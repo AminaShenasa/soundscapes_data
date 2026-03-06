@@ -13,7 +13,7 @@ editor: visual
 ```{r}
 #reading in the data
 library(here)
-harris_island <- read.csv("data/macro_forest_sites/harris_island_hydromoth12.csv")
+harris_island <- read.csv("data/barren_sites/harris_island_hydromoth12.csv")
 ```
 
 ### Filtering to sync time duration across forest and barren sites
@@ -51,12 +51,18 @@ nrow(filtered_harris_island)
 
 ```
 
-### - Crow Island, HydroMoth 0.5
+### - Samsing Cove, Hydromoth 6
+
+#reading in the data
+
+library(here)
+
+samsing_cove \<- read.csv("data/barren_sites/samsing_cove_hydromoth6.csv")
 
 ```{r}
-#reading in the data
+#Reading in the data
 library(here)
-crow_island <- read.csv("data/macro_forest_sites/crow_island_hydromoth0.5.csv")
+samsing_cove <- read.csv("data/barren_sites/samsing_cove_hydromoth6.csv")
 ```
 
 ### Filtering to sync time duration across forest and barren sites
@@ -69,7 +75,7 @@ library(lubridate)
 start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
 end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
 
-filtered_crow_island <- harris_island %>%
+filtered_samsing_cove <- samsing_cove %>%
   # 1. Remove any leading/trailing whitespace from the columns
   mutate(
     DATE..UTC. = trimws(DATE..UTC.),
@@ -89,6 +95,279 @@ filtered_crow_island <- harris_island %>%
   filter(between(full_datetime, start_datetime, end_datetime))
 
 # Check the final count
-nrow(filtered_harris_island)
+nrow(filtered_samsing_cove)
+
+```
+
+### - Sandy Cove, HydroMoth 15
+
+```{r}
+#reading in the data
+library(here)
+sandy_cove <- read.csv("data/barren_sites/sandy_cove_hydromoth15.csv")
+```
+
+### Filtering to sync time duration across forest and barren sites
+
+```{r}
+library(dplyr)
+library(lubridate)
+
+# Define your range
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+filtered_sandy_cove <- sandy_cove %>%
+  # 1. Remove any leading/trailing whitespace from the columns
+  mutate(
+    DATE..UTC. = trimws(DATE..UTC.),
+    TIME..UTC. = trimws(TIME..UTC.)
+  ) %>%
+  # 2. Combine and convert, silencing the 'parse failed' warning
+  mutate(
+    full_datetime = ymd_hms(
+      paste(DATE..UTC., TIME..UTC.), 
+      tz = "UTC", 
+      truncated = 3, 
+      quiet = TRUE
+    )
+  ) %>%
+  # 3. Filter out the NAs (the 112 failed rows) and apply your date range
+  filter(!is.na(full_datetime)) %>%
+  filter(between(full_datetime, start_datetime, end_datetime))
+
+# Check the final count
+nrow(filtered_sandy_cove)
+```
+
+### Macro Kelp Forest Sites
+
+### - Battery Island, HydroMoth 0
+
+```{r}
+#Reading in the data
+library(here)
+battery_island <- read.csv("data/macro_forest_sites/battery_island_hydromoth0.csv")
+```
+
+### Filtering to sync time duration across forest and barren sites
+
+```{r}
+library(dplyr)
+library(lubridate)
+
+# Define your range
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+filtered_battery_island <- battery_island %>%
+  # 1. Remove any leading/trailing whitespace from the columns
+  mutate(
+    DATE..UTC. = trimws(DATE..UTC.),
+    TIME..UTC. = trimws(TIME..UTC.)
+  ) %>%
+  # 2. Combine and convert, silencing the 'parse failed' warning
+  mutate(
+    full_datetime = ymd_hms(
+      paste(DATE..UTC., TIME..UTC.), 
+      tz = "UTC", 
+      truncated = 3, 
+      quiet = TRUE
+    )
+  ) %>%
+  # 3. Filter out the NAs (the 112 failed rows) and apply your date range
+  filter(!is.na(full_datetime)) %>%
+  filter(between(full_datetime, start_datetime, end_datetime))
+
+# Check the final count
+nrow(filtered_battery_island)
+```
+
+### - Crow Island, HydroMoth 0.5
+
+```{r}
+#Reading in the data
+library(here)
+crow_island <- read.csv("data/macro_forest_sites/crow_island_hydromoth0.5.csv")
+```
+
+### Filtering to sync time duration across forest and barren sites
+
+```{r}
+library(dplyr)
+library(lubridate)
+
+# Define your range
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+filtered_crow_island <- crow_island %>%
+  # 1. Remove any leading/trailing whitespace from the columns
+  mutate(
+    DATE..UTC. = trimws(DATE..UTC.),
+    TIME..UTC. = trimws(TIME..UTC.)
+  ) %>%
+  # 2. Combine and convert, silencing the 'parse failed' warning
+  mutate(
+    full_datetime = ymd_hms(
+      paste(DATE..UTC., TIME..UTC.), 
+      tz = "UTC", 
+      truncated = 3, 
+      quiet = TRUE
+    )
+  ) %>%
+  # 3. Filter out the NAs (the 112 failed rows) and apply your date range
+  filter(!is.na(full_datetime)) %>%
+  filter(between(full_datetime, start_datetime, end_datetime))
+
+# Check the final count
+nrow(filtered_crow_island)
+```
+
+### - Middle Island, HydroMoth 2
+
+```{r}
+#Reading in the data
+library(here)
+middle_island <- read.csv("data/macro_forest_sites/middle_island_hydromoth2.csv")
+```
+
+### Filtering to sync time duration across forest and barren sites
+
+-   choosing the same start and end time across forest and barren sites to sync the data
+
+```{r}
+library(dplyr)
+library(lubridate)
+
+# Define your range
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+filtered_middle_island <- middle_island %>%
+  # 1. Remove any leading/trailing whitespace from the columns
+  mutate(
+    DATE..UTC. = trimws(DATE..UTC.),
+    TIME..UTC. = trimws(TIME..UTC.)
+  ) %>%
+  # 2. Combine and convert, silencing the 'parse failed' warning
+  mutate(
+    full_datetime = ymd_hms(
+      paste(DATE..UTC., TIME..UTC.), 
+      tz = "UTC", 
+      truncated = 3, 
+      quiet = TRUE
+    )
+  ) %>%
+  # 3. Filter out the NAs (the 112 failed rows) and apply your date range
+  filter(!is.na(full_datetime)) %>%
+  filter(between(full_datetime, start_datetime, end_datetime))
+
+# Check the final count
+nrow(filtered_middle_island)
+```
+
+## Combining into one data frame for the SVM
+
+-   to correctly run the SVM, all data need to be in one dataframe
+
+```{r}
+all_data <- rbind(
+  transform(samsing_cove,  site = "samsing_cove",  TYPE = "Barren"),
+  transform(sandy_cove,    site = "sandy_cove",    TYPE = "Barren"),
+  transform(harris_island, site = "harris_island", TYPE = "Barren"),
+  transform(crow_island,   site = "crow_island",   TYPE = "Macro_Forest"),
+  transform(middle_island, site = "middle_island", TYPE = "Macro_Forest"),
+  transform(battery_island,site = "battery_island",TYPE = "Macro_Forest")
+)
+
+all_data$TYPE <- factor(all_data$TYPE, levels = c("Barren", "Macro_Forest"))
+all_data$site <- factor(all_data$site)
+
+```
+
+## Testing the SVM
+
+```{r}
+all_data$TYPE <- factor(
+  all_data$TYPE,
+  levels = c("Barren", "Macro_Forest")
+)
+
+```
+
+```{r}
+library(e1071)
+library(dplyr)
+
+run_site_svm_robust <- function(data,
+                               predictors = c("ACI","NDSI","AEI","ADI"),
+                               type_col = "TYPE",
+                               site_col = "site",
+                               kernel = "radial",
+                               cost = 1,
+                               gamma = 0.25) {
+  
+  data[[type_col]] <- factor(data[[type_col]])
+  data <- data[complete.cases(data[, predictors]), ]
+  
+  row_results <- lapply(unique(data[[site_col]]), function(s) {
+    
+    train <- data %>% filter(.data[[site_col]] != s)
+    test  <- data %>% filter(.data[[site_col]] == s)
+    
+    model <- svm(
+      as.formula(paste(type_col, "~", paste(predictors, collapse = "+"))),
+      data = train,
+      kernel = kernel,
+      cost = cost,
+      gamma = gamma,
+      probability = TRUE,
+      scale = TRUE
+    )
+    
+    pred <- predict(model, newdata = test, probability = TRUE)
+    probs <- as.data.frame(attr(pred, "probabilities"))
+    
+    all_levels <- levels(train[[type_col]])
+    missing_levels <- setdiff(all_levels, colnames(probs))
+    for (lv in missing_levels) probs[[lv]] <- 0
+    
+    probs <- probs[, all_levels, drop = FALSE]
+    colnames(probs) <- paste0("prob_", colnames(probs))
+    
+    bind_cols(
+      test,
+      tibble(pred_class = as.character(pred)),
+      probs
+    )
+  })
+  
+  row_results <- bind_rows(row_results)
+  
+  # ---- FIXED SITE-LEVEL SUMMARY ----
+  site_results <- row_results %>%
+    group_by(.data[[site_col]]) %>%
+    summarise(
+      across(starts_with("prob_"), mean),
+      .groups = "drop"
+    ) %>%
+    rowwise() %>%
+    mutate(
+      pred_class = sub(
+        "^prob_",
+        "",
+        names(cur_data())[which.max(c_across(starts_with("prob_")))]
+      )
+    ) %>%
+    ungroup()
+  
+  list(
+    row_results  = row_results,
+    site_results = site_results
+  )
+}
+
+results <- run_site_svm_robust(all_data)
 
 ```
