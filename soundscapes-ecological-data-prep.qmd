@@ -22,6 +22,8 @@ names(upc_forests)
 
 ```
 
+Forested sites were surveyed in 5 meter segments while barren sites were surveyed in 10m segments, here I will be standardizing the two and converting the segments from 5 meters to 10 in forest sites.
+
 ```{r}
 library(tidyverse)
 
