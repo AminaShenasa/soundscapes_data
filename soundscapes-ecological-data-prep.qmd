@@ -1,0 +1,79 @@
+---
+title: "soundscapes-ecological-data-prep"
+format: html
+editor: visual
+---
+
+## Tidying the data
+
+### UPC data: transforming forest and barren sites to be in same format
+
+Transforming forested sites to long format
+
+```{r}
+#reading in forest upc data
+library(here)
+upc_forests <- read.csv("data/ecological_data/Summer_Soundscapes_UPC_Forests - data_filtered.csv")
+
+#checking column names
+names(upc_forests)
+
+```
+
+```{r}
+library(tidyverse)
+
+# convert wide 5m segments to long 10m segments
+long_upc_forests <- upc_forests %>%
+  
+  # rename 5 m segment column
+  rename(SEGMENT5 = `SEGMENT.OF.THE.TRANSECT`) %>%
+  
+  # pivot all point columns to long format
+  pivot_longer(
+    cols = matches("SUBSTRATE|RELIEF|COVER|SUPERLAYER"), # include SUPERLAYER if present
+    names_to = "name",
+    values_to = "CLASSCODE"
+  ) %>%
+  
+  # define CATEGORY from column name
+  mutate(
+    CATEGORY = str_extract(name, "SUBSTRATE|RELIEF|COVER|SUPERLAYER")
+  ) %>%
+  
+  # remove empty points
+  filter(!is.na(CLASSCODE), CLASSCODE != "") %>%
+  
+  # keep all original columns
+  ungroup() %>%
+  
+  # assign 10 m segments by grouping adjacent 5 m segments
+  mutate(
+    SEG_START = as.numeric(str_extract(SEGMENT5, "^[0-9]+")),
+    SEGMENT = case_when(
+      SEG_START < 10 ~ "0-10",
+      SEG_START < 20 ~ "10-20",
+      TRUE ~ "20-30"
+    )
+  ) %>%
+  
+  # calculate COUNT per 10 m segment while keeping metadata
+  group_by(
+    YEAR, MONTH, DAY,
+    TIME, SEASON, SITE, TYPE, OBSERVER, BUDDY, TRANSECT,
+    HEADING.OUT, `Start.Depth..0.meter.of.transect.tape..m..`,
+    `End.Depth..30.meter.of.transect.tape...m..`,
+    SEGMENT,
+    CATEGORY,
+    CLASSCODE
+  ) %>%
+  summarise(COUNT = n(), .groups = "drop") %>%
+  
+  # sort for easier inspection
+  arrange(
+    YEAR, MONTH, DAY,
+    SITE, TRANSECT,
+    SEGMENT,
+    CATEGORY
+  )
+```
