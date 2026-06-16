@@ -1,0 +1,86 @@
+CLASSCODE,FULL_NAME
+ABALONE,Pinto abalone
+AGACLA,Agarum clathratum
+AGAFIM,Agarum fibricatum
+ANEM,Anemone
+ARTCOR,Articulated coralline
+BARNAC,Barnacle
+BARROC,Bare Rock
+BARSAN,Bare Sand
+BRANCH,Red algae (branching flat blade)
+BRITTLE,Brittle star
+BROWN,Brown algae
+BRYO,Bryozoan
+BUSHY,Red algae (cylindrical branches)
+CLAM,Clam
+COLPER,Colpomenia peregrina
+COMTUN,"Tunicate -Colonial, compound, social"
+CORCAL,Corynactis californica (strawberry anemone)
+CRUCOR,Coralline algae -Crustose
+CRYPTO,Cryptopleura ruprechtiana
+CUCSPP,Cucumaria spp. sea cucumber
+CUPCOR,Cup Coral
+CYSOSM,Cystoseira osmundacea
+DEADHOLD,Macrocystis holdfast (dead)
+DEADHOLDANY,Dead kelp holdfast (any)
+DESSPP,Desmarestia spp.
+DICCAL,Dictyoneurum californicum
+DICTYOTALES,Dictyotales spp.
+DIOCHA,Diopatra/Chaetopterus spp. ornate tube worm
+DODFEW,Dodecaceria fewkesi
+EGRMEN,Egregia menziesii
+ENCBRN,Encrusting brown
+ENCRED,Red algae -Encrusting
+ERECOR,Coralline algae -Erect/Articulated
+FEATHER,Feather hydroid
+GORGAD,Gorgonian adult
+GREEN,Green algae
+HERMIT,Hermit crab
+HYDROID,Hydroid
+JUVLAM,Laminariales recruit
+JUVMP,Juvenile Macrocystis
+LACY,Red algae (lacy branching)
+LAMHOLD,Laminariales holdfast (alive)
+LEAFY,Red algae (leaf-like)
+MACPYR_BLU,Macrocystis blade (unattached)
+MACPRY_BLA,Macrocystis blade (attached)
+MACPYR_HF,Macrocystis holdfast (alive)
+MACROCOVER,Primary substrate cover: Macrocystis pyrifera
+MUD,Sediment/Mud
+MUSSEL,Mussel
+NERHOLD,Nereocystis holdfast (alive)
+OPUNT,Opuntiella (red algae)
+OSMUND,Osmundia (red algae)
+PACRUB,Pachythone rubra red sea cucumber
+PETMON,Petaloconchus montereyensis worm snail
+PHRCAL,Phragmatopoma californica colonial sand tube worm
+PHYSPP,Phyllospadix spp. surfgrass
+REDFIL,Filamentous red algae
+SACGRO,Saccharina groenlandica
+SALTRI,Salmacina tribranchiata fragile tube worms
+SARFIL,Sargassum filicinum
+SARMUT,Sargassum muticum
+SARSPP,Sargassum spp.
+SCALLOP,Scallop
+SCUM,Diatom Layer
+SERCOL,Serpula columbiana
+SERSQU,Serpulorbis squamigerus tube snail
+SHELL,Shell Debris
+SOLTUN,Tunicate -Solitary
+SPIRORB,Spirorbis worm tubes
+SPONGE,Sponge
+STYCAL,Stylaster californicus california hydrocoral
+TEGPUL,Tegula pulligo
+TUBEMAT,Tubeworm mat
+TUBEWORM,Tubeworm
+TURF,Red filamentous turf
+UNDAGC,Under Agarum clathratum
+UNDAGF,Under Agarum fibricatum
+UNDBRIT,Brittlestars (layer above primary spaceholder)
+UNDDET,Detritus / Drift Algae
+UNDLAM,Laminaria farlowii sub-canopy
+UNDMAC,Under Macrocystis pyrifera blade
+UNDPAC,Pachythyone rubra layer
+UNDPLGAR,Under Pleurophycus gardneri
+UNDSAC,Under Saccharina groenlandica
+UNK,Unknown – needs ID
