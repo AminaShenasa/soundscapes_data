@@ -11,81 +11,240 @@ all_data$TYPE <- factor(
   all_data$TYPE,
   levels = c("Barren", "Macro_Forest")
 )
-
 ```
 
 ```{r}
-library(e1071)
+# SVM with the same JMP Parameters
+
+library(ggplot2)
 library(dplyr)
+library(tidyr)
+library(kernlab)
 
-run_site_svm_robust <- function(data,
-                               predictors = c("ACI","NDSI","AEI","ADI"),
-                               type_col = "TYPE",
-                               site_col = "site",
-                               kernel = "radial",
-                               cost = 1,
-                               gamma = 0.25) {
-  
-  data[[type_col]] <- factor(data[[type_col]])
-  data <- data[complete.cases(data[, predictors]), ]
-  
-  row_results <- lapply(unique(data[[site_col]]), function(s) {
-    
-    train <- data %>% filter(.data[[site_col]] != s)
-    test  <- data %>% filter(.data[[site_col]] == s)
-    
-    model <- svm(
-      as.formula(paste(type_col, "~", paste(predictors, collapse = "+"))),
-      data = train,
-      kernel = kernel,
-      cost = cost,
-      gamma = gamma,
-      probability = TRUE,
-      scale = TRUE
-    )
-    
-    pred <- predict(model, newdata = test, probability = TRUE)
-    probs <- as.data.frame(attr(pred, "probabilities"))
-    
-    all_levels <- levels(train[[type_col]])
-    missing_levels <- setdiff(all_levels, colnames(probs))
-    for (lv in missing_levels) probs[[lv]] <- 0
-    
-    probs <- probs[, all_levels, drop = FALSE]
-    colnames(probs) <- paste0("prob_", colnames(probs))
-    
-    bind_cols(
-      test,
-      tibble(pred_class = as.character(pred)),
-      probs
-    )
-  })
-  
-  row_results <- bind_rows(row_results)
-  
-  # ---- FIXED SITE-LEVEL SUMMARY ----
-  site_results <- row_results %>%
-    group_by(.data[[site_col]]) %>%
-    summarise(
-      across(starts_with("prob_"), mean),
-      .groups = "drop"
-    ) %>%
-    rowwise() %>%
-    mutate(
-      pred_class = sub(
-        "^prob_",
-        "",
-        names(cur_data())[which.max(c_across(starts_with("prob_")))]
-      )
-    ) %>%
-    ungroup()
-  
-  list(
-    row_results  = row_results,
-    site_results = site_results
-  )
+BARREN_LABEL <- "Barren"
+FOREST_LABEL <- "Macro_Forest"
+predictors   <- c("ACI", "NDSI", "AEI", "ADI")
+type_col     <- "TYPE"
+
+# Prep data 
+keep_rows  <- complete.cases(all_data[, c(predictors, type_col)])
+model_data <- all_data[keep_rows, ]
+model_data[[type_col]] <- factor(model_data[[type_col]],
+                                  levels = c(BARREN_LABEL, FOREST_LABEL))
+
+cat("Total rows used:", nrow(model_data), "\n")
+cat("Class counts:\n")
+print(table(model_data[[type_col]]))
+
+# Train SVM (cost = C = 1, gamma = sigma = 0.25, RBF kernel)
+svm_model <- ksvm(
+  TYPE ~ ACI + NDSI + AEI + ADI,
+  data       = model_data,
+  kernel     = "rbfdot",
+  kpar       = list(sigma = 0.25),
+  C          = 1,
+  prob.model = TRUE,
+  scaled     = TRUE
+)
+
+cat("\n--- Model Summary ---\n")
+cat("Kernel:                   Radial Basis Function\n")
+cat("Cost (C):                ", 1, "\n")
+cat("Gamma (sigma):           ", 0.25, "\n")
+cat("Number of Support Vectors:", svm_model@nSV, "\n")
+
+# 3. Training predictions & confusion matrix 
+train_pred <- predict(svm_model, newdata = model_data)
+stopifnot(length(train_pred) == nrow(model_data))
+
+conf_mat  <- table(Actual = model_data[[type_col]], Predicted = train_pred)
+conf_rate <- prop.table(conf_mat, margin = 1)
+
+cat("\n--- Confusion Matrix (Counts) ---\n")
+print(conf_mat)
+cat("\n--- Confusion Matrix (Predicted Rates) ---\n")
+print(round(conf_rate, 3))
+
+misclass_rate <- 1 - sum(diag(conf_mat)) / sum(conf_mat)
+cat("\nMisclassification Rate:", round(misclass_rate, 7), "\n")
+cat("(JMP reference:          0.2158539)\n")
+```
+
+```{r}
+# PLOTS
+  # Response Profile Plot (ACI vs NDSI decision boundary)
+AEI_fixed <- mean(model_data$AEI, na.rm = TRUE)
+ADI_fixed <- mean(model_data$ADI, na.rm = TRUE)
+
+grid <- expand.grid(
+  NDSI = seq(min(model_data$NDSI), max(model_data$NDSI), length.out = 150),
+  ACI  = seq(min(model_data$ACI),  max(model_data$ACI),  length.out = 150)
+) %>%
+  mutate(AEI = AEI_fixed, ADI = ADI_fixed)
+
+grid$pred_class <- as.character(predict(svm_model, newdata = grid))
+
+p_profile <- ggplot(grid, aes(x = NDSI, y = ACI, fill = pred_class)) +
+  geom_raster(interpolate = TRUE, alpha = 0.75) +
+  scale_fill_manual(
+    values = c("Barren"       = "#F4CCCC",
+               "Macro_Forest" = "#C9DAF8"),
+    name   = "TYPE",
+    labels = c("Barren"       = "TYPE = Barren",
+               "Macro_Forest" = "TYPE = Macro_Forest")
+  ) +
+  labs(
+    title    = "Response Profile Plot",
+    subtitle = paste0("AEI fixed at ", round(AEI_fixed, 4),
+                      "  |  ADI fixed at ", round(ADI_fixed, 4)),
+    x = "NDSI",
+    y = "ACI"
+  ) +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "right")
+
+print(p_profile)
+
+# Confusion matrix summary
+cat("  Confusion Matrix Summary\n")
+cat(sprintf("  %-15s  %-20s  %-20s  %-10s\n",
+            "Actual", "Pred:Barren", "Pred:Forest", "Misclass"))
+for (lv in c(BARREN_LABEL, FOREST_LABEL)) {
+  rc <- conf_mat[lv, ]
+  rr <- conf_rate[lv, ]
+  cat(sprintf("  %-15s  %-20s  %-20s  %-10s\n",
+              lv,
+              paste0(rc[BARREN_LABEL], " (", round(rr[BARREN_LABEL], 3), ")"),
+              paste0(rc[FOREST_LABEL], " (", round(rr[FOREST_LABEL], 3), ")"),
+              round(1 - rr[lv], 3)))
 }
+cat(sprintf("\n  Overall Misclassification Rate: %.7f\n", misclass_rate))
 
-results <- run_site_svm_robust(all_data)
+# Probability Outputs
+prob_all <- predict(svm_model, newdata = model_data, type = "probabilities")
+model_data$prob_barren <- prob_all[, BARREN_LABEL]
+model_data$prob_forest <- prob_all[, FOREST_LABEL]
+model_data$gradient_score <- model_data$prob_barren  # 0 = forest, 1 = barren
 
+# Habitat type bar plot
+type_summary <- model_data %>%
+  group_by(TYPE) %>%
+  summarise(
+    mean_prob_barren = mean(prob_barren),
+    mean_prob_forest = mean(prob_forest),
+    .groups = "drop"
+  ) %>%
+  tidyr::pivot_longer(
+    cols = c(mean_prob_barren, mean_prob_forest),
+    names_to  = "predicted_as",
+    values_to = "mean_prob"
+  ) %>%
+  mutate(
+    predicted_as = if_else(predicted_as == "mean_prob_barren",
+                           "Predicted to be urchin barrens",
+                           "Predicted to be Macrocystis Forest"),
+    TYPE_label = if_else(TYPE == BARREN_LABEL,
+                         "Urchin Barrens",
+                         "Macrocystis Forest")  
+  )
+
+p_jmp <- ggplot(jmp_summary,
+                aes(x = TYPE_label, y = mean_prob, fill = predicted_as)) +
+  geom_col(position = position_dodge(width = 0.7), width = 0.65) +
+  geom_text(aes(label = round(mean_prob, 2)),
+            position = position_dodge(width = 0.7),
+            vjust = -0.4, size = 4) +
+  scale_fill_manual(
+    values = c("Predicted to be urchin barrens"     = "#B22222",
+               "Predicted to be Macrocystis Forest" = "#4472C4"),
+    labels = c("Predicted to be urchin barrens"     = "Predicted to be Urchin Barrens",
+               "Predicted to be Macrocystis Forest" = expression("Predicted to be"~italic("Macrocystis")~"Forest")),
+    name = NULL
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    expand = expansion(mult = c(0, 0.08)),
+    name   = "Probability of assignment (SVM)"
+  ) +
+  xlab(NULL) +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "top")
+
+print(p_jmp)
+
+# Site-level mean gradient scores 
+gradient_summary <- model_data %>%
+  group_by(site, TYPE) %>%
+  summarise(
+    mean_gradient_score = mean(gradient_score),
+    se_gradient_score   = sd(gradient_score) / sqrt(n()),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # Clean site labels: replace _ with space, title case
+    site_label = gsub("_", " ", site),
+    site_label = tools::toTitleCase(site_label),
+    # Clean TYPE labels for legend
+    type_label = if_else(TYPE == BARREN_LABEL, "Urchin Barren", "Macrocystis Forest")
+  )
+
+# Legend labels with italics for Macrocystis using expression/parse
+legend_labels <- c(
+  "Urchin Barren"      = "Urchin Barren",
+  "Macrocystis Forest" = "italic(Macrocystis)~Forest"
+)
+
+p_gradient <- ggplot(gradient_summary,
+                     aes(x = reorder(site_label, mean_gradient_score),
+                         y = mean_gradient_score,
+                         fill = type_label)) +
+  geom_col(width = 0.7) +
+  geom_errorbar(
+    aes(ymin = mean_gradient_score - se_gradient_score,
+        ymax = mean_gradient_score + se_gradient_score),
+    width = 0.2
+  ) +
+  geom_hline(yintercept = 0.5, linetype = "dashed", colour = "grey40") +
+  scale_fill_manual(
+    values = c("Urchin Barren"      = "firebrick3",
+               "Macrocystis Forest" = "steelblue3"),
+    name   = "TYPE",
+    labels = c("Urchin Barren"      = "Urchin Barren",
+               "Macrocystis Forest" = expression(italic("Macrocystis")~"Forest"))
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    expand = expansion(mult = c(0, 0.05)),
+    name   = "Mean gradient score  (0 = forest  \u2192  1 = barren)"
+  ) +
+  xlab("Site") +
+  ggtitle("Mean gradient score by site",
+          subtitle = "Error bars = \u00B1 SE; dashed line = classification threshold") +
+  theme_bw(base_size = 13) +
+  theme(axis.text.x = ggplot2::element_text(angle = 30, hjust = 1))
+
+print(p_gradient)
+# Site level summary table
+site_summary <- model_data %>%
+  group_by(site) %>%
+  summarise(
+    true_type           = first(TYPE),
+    mean_gradient_score = mean(gradient_score),
+    n_sequences         = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    pred_class = if_else(mean_gradient_score >= 0.5, BARREN_LABEL, FOREST_LABEL),
+    correct    = (true_type == pred_class)
+  ) %>%
+  arrange(mean_gradient_score)
+
+cat("\n--- Site-Level Gradient Summary ---\n")
+print(site_summary)
+
+# Save plots
+ggsave("svm_barplot.png",      plot = p_jmp,      width = 7, height = 6, dpi = 150)
+ggsave("svm_response_profile.png", plot = p_profile,  width = 7, height = 6, dpi = 150)
+ggsave("svm_gradient_scores.png",  plot = p_gradient, width = 8, height = 5, dpi = 150)
+cat("\nDone. Plots saved.\n")
 ```
