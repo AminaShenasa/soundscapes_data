@@ -273,12 +273,12 @@ nrow(filtered_middle_island)
 
 ```{r}
 all_data <- rbind(
-  transform(samsing_cove,  site = "samsing_cove",  TYPE = "Barren"),
-  transform(sandy_cove,    site = "sandy_cove",    TYPE = "Barren"),
-  transform(harris_island, site = "harris_island", TYPE = "Barren"),
-  transform(crow_island,   site = "crow_island",   TYPE = "Macro_Forest"),
-  transform(middle_island, site = "middle_island", TYPE = "Macro_Forest"),
-  transform(battery_island,site = "battery_island",TYPE = "Macro_Forest")
+  transform(filtered_samsing_cove,  site = "samsing_cove",  TYPE = "Barren"),
+  transform(filtered_sandy_cove,    site = "sandy_cove",    TYPE = "Barren"),
+  transform(filtered_harris_island, site = "harris_island", TYPE = "Barren"),
+  transform(filtered_crow_island,   site = "crow_island",   TYPE = "Macro_Forest"),
+  transform(filtered_middle_island, site = "middle_island", TYPE = "Macro_Forest"),
+  transform(filtered_battery_island,site = "battery_island",TYPE = "Macro_Forest")
 )
 
 all_data$TYPE <- factor(all_data$TYPE, levels = c("Barren", "Macro_Forest"))
