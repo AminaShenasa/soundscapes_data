@@ -1,0 +1,109 @@
+---
+title: "ecological-data-modeling"
+format: html
+editor: visual
+---
+
+## Ecological Data Modeling
+
+### PERMANOVA
+
+```{r}
+library(vegan)
+library(dplyr)
+library(readxl)
+library(ggplot2)
+
+# PERMANOVA
+set.seed(123)
+
+permanova <- adonis2(
+  comm ~ TYPE + SITE %in% TYPE + TRANSECT %in% SITE + SEGMENT %in% TRANSECT,
+  data         = filtered_algae_invert_swath,
+  method       = "bray",
+  permutations = 999
+)
+
+print(permanova)
+```
+
+```{r}
+# Homogeneity of dispersion
+dist_bm <- vegdist(comm, method = "bray")
+
+dispersion <- betadisper(dist_bm, filtered_algae_invert_swath$TYPE)
+permutest(dispersion)
+plot(dispersion)
+```
+
+### NMDS
+
+```{r}
+library(ggtext)
+
+site_labels <- c(
+  "HARRIS ISLAND"  = "<span style='color:red'>HARRIS ISLAND</span>",
+  "SAMSING COVE"   = "<span style='color:red'>SAMSING COVE</span>",
+  "SANDY COVE"     = "<span style='color:red'>SANDY COVE</span>",
+  "BATTERY ISLAND" = "<span style='color:blue'>BATTERY ISLAND</span>",
+  "CROW ISLAND"    = "<span style='color:blue'>CROW ISLAND</span>",
+  "MIDDLE ISLAND"  = "<span style='color:blue'>MIDDLE ISLAND</span>"
+)
+
+nmds <- metaMDS(comm, distance = "bray", k = 2, trymax = 100)
+nmds$stress
+
+scores_df <- as.data.frame(scores(nmds, display = "sites"))
+scores_df$TYPE <- filtered_algae_invert_swath$TYPE
+scores_df$SITE <- filtered_algae_invert_swath$SITE
+
+ggplot(scores_df, aes(x = NMDS1, y = NMDS2, color = TYPE, shape = SITE)) +
+  geom_point(size = 3, alpha = 0.8) +
+  scale_shape_manual(
+    values = c(
+      "HARRIS ISLAND"  = 16,
+      "SAMSING COVE"   = 17,
+      "SANDY COVE"     = 15,
+      "BATTERY ISLAND" = 3,
+      "CROW ISLAND"    = 7,
+      "MIDDLE ISLAND"  = 8
+    ),
+    labels = site_labels,
+    limits = c(
+      "HARRIS ISLAND",
+      "SAMSING COVE",
+      "SANDY COVE",
+      "BATTERY ISLAND",
+      "CROW ISLAND",
+      "MIDDLE ISLAND"
+    )
+  ) +
+  stat_ellipse(aes(group = TYPE), level = 0.95, linetype = "dashed") +
+  scale_color_manual(values = c("BARREN" = "red", "MACRO" = "blue")) +
+  theme_classic() +
+  theme(legend.text = element_markdown()) +
+  labs(
+    title = paste0("NMDS of Community Structures (Stress = ",
+                   round(nmds$stress, 3), ")"),
+    color = "Habitat Type",
+    shape = "Site"
+  )
+# Inside scale_shape_manual() or scale_color_manual(), add:
+labels = site_labels
+
+# Inside theme(), add:
+legend.text = element_markdown()
+```
+
+### SIMPER
+
+```{r}
+simper_result <- simper(
+  comm,
+  group        = filtered_algae_invert_swath$TYPE,
+  permutations = 999
+)
+
+summary(simper_result)
+# Top contributors to BARREN vs MACRO dissimilarity
+```
