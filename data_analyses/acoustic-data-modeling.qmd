@@ -1,5 +1,5 @@
 ---
-title: "soundscapes-data-modeling"
+title: "acoustic-data-modeling"
 format: html
 editor: visual
 ---
@@ -28,16 +28,16 @@ type_col     <- "TYPE"
 
 # Prep data 
 keep_rows  <- complete.cases(all_data[, c(predictors, type_col)])
-model_data <- all_data[keep_rows, ]
-model_data[[type_col]] <- factor(model_data[[type_col]],
+habitat_model_data <- all_data[keep_rows, ]
+habitat_model_data[[type_col]] <- factor(habitat_model_data[[type_col]],
                                   levels = c(BARREN_LABEL, FOREST_LABEL))
 
-cat("Total rows used:", nrow(model_data), "\n")
+cat("Total rows used:", nrow(habitat_model_data), "\n")
 cat("Class counts:\n")
-print(table(model_data[[type_col]]))
+print(table(habitat_model_data[[type_col]]))
 
 # Train SVM (cost = C = 1, gamma = sigma = 0.25, RBF kernel)
-svm_model <- ksvm(
+habitat_svm_model <- ksvm(
   TYPE ~ ACI + NDSI + AEI + ADI,
   data       = model_data,
   kernel     = "rbfdot",
@@ -51,13 +51,13 @@ cat("\n--- Model Summary ---\n")
 cat("Kernel:                   Radial Basis Function\n")
 cat("Cost (C):                ", 1, "\n")
 cat("Gamma (sigma):           ", 0.25, "\n")
-cat("Number of Support Vectors:", svm_model@nSV, "\n")
+cat("Number of Support Vectors:", habitat_svm_model@nSV, "\n")
 
 # 3. Training predictions & confusion matrix 
-train_pred <- predict(svm_model, newdata = model_data)
-stopifnot(length(train_pred) == nrow(model_data))
+train_pred <- predict(habitat_svm_model, newdata = habitat_model_data)
+stopifnot(length(train_pred) == nrow(habitat_model_data))
 
-conf_mat  <- table(Actual = model_data[[type_col]], Predicted = train_pred)
+conf_mat  <- table(Actual = habitat_model_data[[type_col]], Predicted = train_pred)
 conf_rate <- prop.table(conf_mat, margin = 1)
 
 cat("\n--- Confusion Matrix (Counts) ---\n")
@@ -73,16 +73,16 @@ cat("(JMP reference:          0.2158539)\n")
 ```{r}
 # PLOTS
   # Response Profile Plot (ACI vs NDSI decision boundary)
-AEI_fixed <- mean(model_data$AEI, na.rm = TRUE)
-ADI_fixed <- mean(model_data$ADI, na.rm = TRUE)
+AEI_fixed <- mean(habitat_model_data$AEI, na.rm = TRUE)
+ADI_fixed <- mean(habitat_model_data$ADI, na.rm = TRUE)
 
 grid <- expand.grid(
-  NDSI = seq(min(model_data$NDSI), max(model_data$NDSI), length.out = 150),
-  ACI  = seq(min(model_data$ACI),  max(model_data$ACI),  length.out = 150)
+  NDSI = seq(min(habitat_model_data$NDSI), max(habitat_model_data$NDSI), length.out = 150),
+  ACI  = seq(min(habitat_model_data$ACI),  max(habitat_model_data$ACI),  length.out = 150)
 ) %>%
   mutate(AEI = AEI_fixed, ADI = ADI_fixed)
 
-grid$pred_class <- as.character(predict(svm_model, newdata = grid))
+grid$pred_class <- as.character(predict(habitat_svm_model, newdata = grid))
 
 p_profile <- ggplot(grid, aes(x = NDSI, y = ACI, fill = pred_class)) +
   geom_raster(interpolate = TRUE, alpha = 0.75) +
@@ -121,13 +121,13 @@ for (lv in c(BARREN_LABEL, FOREST_LABEL)) {
 cat(sprintf("\n  Overall Misclassification Rate: %.7f\n", misclass_rate))
 
 # Probability Outputs
-prob_all <- predict(svm_model, newdata = model_data, type = "probabilities")
-model_data$prob_barren <- prob_all[, BARREN_LABEL]
-model_data$prob_forest <- prob_all[, FOREST_LABEL]
-model_data$gradient_score <- model_data$prob_barren  # 0 = forest, 1 = barren
+prob_all <- predict(habitat_svm_model, newdata = habitat_model_data, type = "probabilities")
+habitat_model_data$prob_barren <- prob_all[, BARREN_LABEL]
+habitat_model_data$prob_forest <- prob_all[, FOREST_LABEL]
+habitat_model_data$gradient_score <- habitat_model_data$prob_barren  # 0 = forest, 1 = barren
 
 # Habitat type bar plot
-type_summary <- model_data %>%
+type_summary <- habitat_model_data %>%
   group_by(TYPE) %>%
   summarise(
     mean_prob_barren = mean(prob_barren),
@@ -173,7 +173,7 @@ p_jmp <- ggplot(jmp_summary,
 print(p_jmp)
 
 # Site-level mean gradient scores 
-gradient_summary <- model_data %>%
+gradient_summary <- habitat_model_data %>%
   group_by(site, TYPE) %>%
   summarise(
     mean_gradient_score = mean(gradient_score),
@@ -225,7 +225,7 @@ p_gradient <- ggplot(gradient_summary,
 
 print(p_gradient)
 # Site level summary table
-site_summary <- model_data %>%
+site_summary <- habitat_model_data %>%
   group_by(site) %>%
   summarise(
     true_type           = first(TYPE),
@@ -243,9 +243,9 @@ cat("\n--- Site-Level Gradient Summary ---\n")
 print(site_summary)
 
 # Save plots
-ggsave("svm_barplot.png",      plot = p_jmp,      width = 7, height = 6, dpi = 150)
-ggsave("svm_response_profile.png", plot = p_profile,  width = 7, height = 6, dpi = 150)
-ggsave("svm_gradient_scores.png",  plot = p_gradient, width = 8, height = 5, dpi = 150)
+ggsave("habitat_svm_barplot.png",      plot = p_jmp,      width = 7, height = 6, dpi = 150)
+ggsave("habitat_svm_response_profile.png", plot = p_profile,  width = 7, height = 6, dpi = 150)
+ggsave("habitat_svm_gradient_scores.png",  plot = p_gradient, width = 8, height = 5, dpi = 150)
 cat("\nDone. Plots saved.\n")
 ```
 
@@ -812,4 +812,90 @@ ggplot(pca_scores, aes(x = PC1, y = PC2, color = substrate, shape = TYPE)) +
   ) +
   theme(legend.position = "right")
 head(kelp_probs)
+```
+
+## Acoustic and Ecological Relationships
+
+### Stepwise Multiple Regression - Forest/Barren SVM
+
+```{r}
+library(dplyr)
+library(here)
+
+# Read in ecological data
+eco_data <- read.csv("/Users/aminashenasa/soundscapes_data/data/ecological_data/ecological_variables_summary.csv")
+
+# Clean column names for easier use
+eco_data <- eco_data %>%
+  rename(
+    red_urchin_biomass  = `Mean.Mean.Red.Urchin.Biomass...m2.`,
+    stipe_density       = `Mean.Mean.Stipe.Density..m.2..`,
+    red_urchin_density  = `Mean.Strongylocentrotus.franciscanus..red.urchin.m.2.`,
+    green_urchin_density = `Mean.Strongylocentrotus..green.urchin.m.2.`
+  )
+
+# Get mean SVM probability per site from habitat_model_data
+prob_by_site <- habitat_model_data %>%
+  group_by(SITE) %>%
+  summarise(mean_prob = mean(prob_barren, na.rm = TRUE))
+
+# Standardize site names to match between datasets
+prob_by_site$SITE <- gsub(" ", "_", prob_by_site$SITE)
+
+# Join with ecological data
+regression_data <- left_join(prob_by_site, eco_data, by = "SITE")
+
+print(regression_data)
+
+# Stepwise multiple regression
+full_model <- lm(
+  mean_prob ~ red_urchin_density + red_urchin_biomass +
+              green_urchin_density + stipe_density,
+  data = regression_data
+)
+
+# Stepwise selection (both directions)
+step_model <- step(full_model, direction = "both")
+
+summary(step_model)
+```
+
+```{r}
+library(ggplot2)
+library(patchwork)
+
+# Individual scatter plots with lm line
+p_red_density <- ggplot(regression_data, aes(x = red_urchin_density, y = mean_prob, color = TYPE)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 0.8) +
+  scale_color_manual(values = c("Barren" = "red", "Macro_Forest" = "blue")) +
+  theme_classic() +
+  labs(x = "Red urchin density (m²)", y = "SVM probability (Barren)", color = "Habitat")
+
+p_red_biomass <- ggplot(regression_data, aes(x = red_urchin_biomass, y = mean_prob, color = TYPE)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 0.8) +
+  scale_color_manual(values = c("Barren" = "red", "Macro_Forest" = "blue")) +
+  theme_classic() +
+  labs(x = "Red urchin biomass (m²)", y = "SVM probability (Barren)", color = "Habitat")
+
+p_green_density <- ggplot(regression_data, aes(x = green_urchin_density, y = mean_prob, color = TYPE)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 0.8) +
+  scale_color_manual(values = c("Barren" = "red", "Macro_Forest" = "blue")) +
+  theme_classic() +
+  labs(x = "Green urchin density (m²)", y = "SVM probability (Barren)", color = "Habitat")
+
+p_stipe <- ggplot(regression_data, aes(x = stipe_density, y = mean_prob, color = TYPE)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 0.8) +
+  scale_color_manual(values = c("Barren" = "red", "Macro_Forest" = "blue")) +
+  theme_classic() +
+  labs(x = "Macrocystis stipe density (m²)", y = "SVM probability (Barren)", color = "Habitat")
+
+# Combine into one figure
+(p_red_density + p_red_biomass) / (p_green_density + p_stipe) +
+  plot_layout(guides = "collect") +
+  plot_annotation(title = "SVM Probability vs Ecological Variables") &
+  theme(legend.position = "bottom")
 ```
