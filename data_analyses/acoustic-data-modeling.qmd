@@ -4,7 +4,7 @@ format: html
 editor: visual
 ---
 
-## Testing the SVM
+## Forest/Barren SVM
 
 ```{r}
 all_data$TYPE <- factor(
@@ -247,4 +247,569 @@ ggsave("svm_barplot.png",      plot = p_jmp,      width = 7, height = 6, dpi = 1
 ggsave("svm_response_profile.png", plot = p_profile,  width = 7, height = 6, dpi = 150)
 ggsave("svm_gradient_scores.png",  plot = p_gradient, width = 8, height = 5, dpi = 150)
 cat("\nDone. Plots saved.\n")
+```
+
+## More Plots!
+
+### Violin Plot of Acoustic Indices by Habitat Type
+
+```{r}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+# Pivot to long format
+long_data <- all_data %>%
+  select(TYPE, NDSI, ACI, ADI, AEI) %>%
+  pivot_longer(cols = c(NDSI, ACI, ADI, AEI),
+               names_to = "index",
+               values_to = "value")
+
+# Keep index order
+long_data$index <- factor(long_data$index, levels = c("NDSI", "ACI", "ADI", "AEI"))
+
+ggplot(long_data, aes(x = TYPE, y = value, fill = index, color = index)) +
+  geom_violin(linewidth = 0.8, trim = FALSE) +
+  facet_wrap(~ index, scales = "free_y", ncol = 1) +
+  scale_fill_manual(values = c(
+    "NDSI" = "#648FFF",
+    "ACI"  = "#DC267F",
+    "ADI"  = "#FE6100",
+    "AEI"  = "#F9DE56"
+  )) +
+  scale_color_manual(values = c(
+     "NDSI" = "#648FFF",
+    "ACI"  = "#DC267F",
+    "ADI"  = "#FE6100",
+    "AEI"  = "#F9DE56"
+  )) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  labs(x = "Habitat Type", y = NULL)
+```
+
+### SVM Probability Plot By Index
+
+```{r}
+library(kernlab)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(patchwork)
+
+# Extract barren probability
+prob_barren <- probs[, "Barren"]
+
+# Build plotting dataframe
+plot_df <- model_data %>%
+  select(NDSI, ACI, ADI, AEI) %>%
+  mutate(prob_barren = prob_barren)
+
+# Function to make one panel
+make_panel <- function(df, index, color) {
+  ggplot(df, aes(x = .data[[index]], y = prob_barren)) +
+    geom_point(color = color, alpha = 0.3, size = 0.8) +
+    geom_smooth(color = "black", se = FALSE, linewidth = 0.8) +
+    theme_classic() +
+    labs(x = index, y = NULL)
+}
+
+# Build each panel
+p1 <- make_panel(plot_df, "NDSI", "#648FFF")
+p2 <- make_panel(plot_df, "ACI",  "#DC267F")
+p3 <- make_panel(plot_df, "ADI",  "#FE6100")
+p4 <- make_panel(plot_df, "AEI",  "#F9DE56")
+
+# Combine
+wrap_plots(p1, p2, p3, p4, nrow = 1) +
+  plot_layout(axis_titles = "collect") &
+  labs(y = "Probability of assignment as Urchin Barrens (SVM)") &
+  theme(plot.margin = margin(5, 5, 5, 5))
+```
+
+## Urchin Activity Acoustics Modeling
+
+These acoustics are from three red urchins placed on different substrate/food types (rocks with crustose coralline algae, bare rock, and bare rock with kelp), and recorded underwater (about 30ft depth) for 2 days each.
+
+### CCA SVM
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(kernlab)
+library(here)
+
+# Read in data
+cca_urchin_data <- read.csv("/Users/aminashenasa/soundscapes_data/data/acoustic_data/filtered_data/Sage_Constraints_Experiment_CCA Urchin Indices.csv")
+
+# Clean TYPE and fix NDSI class
+cca_urchin_data$TYPE <- trimws(cca_urchin_data$TYPE)
+cca_urchin_data$NDSI <- as.numeric(cca_urchin_data$NDSI)
+
+URCHIN_LABEL    <- "URCHIN_CCA"
+NO_URCHIN_LABEL <- "NO URCHIN_CCA"
+predictors      <- c("ACI", "NDSI")
+type_col        <- "TYPE"
+
+# Prep data
+keep_rows             <- complete.cases(cca_urchin_data[, c(predictors, type_col)])
+cca_urchin_model_data <- cca_urchin_data[keep_rows, ]
+cca_urchin_model_data <- cca_urchin_model_data %>% filter(!is.na(TYPE))
+cca_urchin_model_data[[type_col]] <- factor(
+  cca_urchin_model_data[[type_col]],
+  levels = c(URCHIN_LABEL, NO_URCHIN_LABEL)
+)
+
+cat("Total rows used:", nrow(cca_urchin_model_data), "\n")
+cat("Class counts:\n")
+print(table(cca_urchin_model_data[[type_col]]))
+
+# Build clean dataframe
+cca_clean_data <- data.frame(
+  TYPE = ifelse(trimws(cca_urchin_data$TYPE) == "URCHIN_CCA", "URCHIN_CCA", "NO_URCHIN_CCA"),
+  ACI  = as.numeric(cca_urchin_data$ACI),
+  NDSI = as.numeric(cca_urchin_data$NDSI)
+)
+cca_clean_data <- na.omit(cca_clean_data)
+cca_clean_data$TYPE <- factor(
+  cca_clean_data$TYPE,
+  levels = c("URCHIN_CCA", "NO_URCHIN_CCA")
+)
+
+cat("Clean data class counts:\n")
+print(table(cca_clean_data$TYPE))
+nrow(cca_clean_data)
+
+# Train SVM
+cca_urchin_svm_model <- kernlab::ksvm(
+  TYPE ~ ACI + NDSI,
+  data       = cca_clean_data,
+  kernel     = "rbfdot",
+  kpar       = list(sigma = 0.25),
+  C          = 1,
+  prob.model = TRUE,
+  scaled     = TRUE
+)
+
+cat("\n--- Model Summary ---\n")
+cat("Kernel:                   Radial Basis Function\n")
+cat("Cost (C):                ", 1, "\n")
+cat("Gamma (sigma):           ", 0.25, "\n")
+cat("Number of Support Vectors:", cca_urchin_svm_model@nSV, "\n")
+
+# Training predictions & confusion matrix
+cca_train_pred <- predict(cca_urchin_svm_model, newdata = cca_clean_data)
+cca_conf_mat   <- table(Actual = cca_clean_data$TYPE, Predicted = cca_train_pred)
+cca_conf_rate  <- prop.table(cca_conf_mat, margin = 1)
+
+cat("\n--- Confusion Matrix (Counts) ---\n")
+print(cca_conf_mat)
+cat("\n--- Confusion Matrix (Predicted Rates) ---\n")
+print(round(cca_conf_rate, 3))
+
+cca_misclass_rate <- 1 - sum(diag(cca_conf_mat)) / sum(cca_conf_mat)
+cat("\nMisclassification Rate:", round(cca_misclass_rate, 7), "\n")
+
+# 5-fold cross validation
+set.seed(123)
+cca_urchin_svm_cv <- kernlab::ksvm(
+  TYPE ~ ACI + NDSI,
+  data       = cca_clean_data,
+  kernel     = "rbfdot",
+  kpar       = list(sigma = 0.25),
+  C          = 1,
+  cross      = 5,
+  scaled     = TRUE
+)
+cat("5-fold CV error:", cross(cca_urchin_svm_cv), "\n")
+cat("5-fold CV accuracy:", 1 - cross(cca_urchin_svm_cv), "\n")
+```
+
+```{r}
+library(ggplot2)
+library(tidyr)
+
+cca_urchin_model_data$NDSI <- as.numeric(cca_urchin_model_data$NDSI)
+
+cca_urchin_model_data %>%
+  select(TYPE, ACI, NDSI) %>%
+  pivot_longer(cols = c(ACI, NDSI), names_to = "index", values_to = "value") %>%
+  ggplot(aes(x = TYPE, y = value, fill = TYPE)) +
+  geom_violin() +
+  geom_jitter(width = 0.1, alpha = 0.5, size = 2) +
+  facet_wrap(~ index, scales = "free_y") +
+  scale_fill_manual(values = c("URCHIN_CCA" = "#648FFF", "NO URCHIN_CCA" = "#DC267F")) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  labs(x = NULL, y = "Value")
+```
+
+```{r}
+# Create prediction grid over ACI and NDSI ranges
+ACI_range  <- seq(min(cca_clean_data$ACI), max(cca_clean_data$ACI), length.out = 200)
+NDSI_range <- seq(min(cca_clean_data$NDSI), max(cca_clean_data$NDSI), length.out = 200)
+
+cca_grid <- expand.grid(ACI = ACI_range, NDSI = NDSI_range)
+
+cca_grid$pred_class <- predict(cca_urchin_svm_model, newdata = cca_grid)
+
+cca_p_profile <- ggplot(cca_grid, aes(x = NDSI, y = ACI, fill = pred_class)) +
+  geom_raster(interpolate = TRUE, alpha = 0.75) +
+  geom_point(
+    data        = cca_clean_data,
+    aes(x = NDSI, y = ACI, shape = TYPE),
+    inherit.aes = FALSE,
+    size        = 3
+  ) +
+  scale_fill_manual(
+    values = c("URCHIN_CCA"    = "#F4CCCC",
+               "NO_URCHIN_CCA" = "#C9DAF8"),
+    name   = "Predicted Class",
+    labels = c("URCHIN_CCA"    = "Urchins on CCA",
+               "NO_URCHIN_CCA" = "Background Noise")
+  ) +
+  scale_shape_manual(
+    values = c("URCHIN_CCA"    = 16,
+               "NO_URCHIN_CCA" = 17),
+    name   = "Actual Class",
+    labels = c("URCHIN_CCA"    = "Urchins on CCA",
+               "NO_URCHIN_CCA" = "Background Noise")
+  ) +
+  labs(
+    title = "Response Profile Plot — CCA",
+    x     = "NDSI",
+    y     = "ACI"
+  ) +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "right")
+
+print(cca_p_profile)
+```
+
+### Bare Rock SVM
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(kernlab)
+library(here)
+
+# Read in data
+rock_urchin_data <- read.csv("/Users/aminashenasa/soundscapes_data/data/acoustic_data/filtered_data/Sage_Constraints_Experiment_Bare Rock Urchin Indices.csv")
+
+# Fix NDSI class
+rock_urchin_data$NDSI <- as.numeric(rock_urchin_data$NDSI)
+
+URCHIN_LABEL    <- "URCHINS_BARE ROCK"
+NO_URCHIN_LABEL <- "NO URCHINS_BARE ROCK"
+predictors      <- c("ACI", "NDSI")
+type_col        <- "TYPE"
+
+# Prep data
+keep_rows              <- complete.cases(rock_urchin_data[, c(predictors, type_col)])
+rock_urchin_model_data  <- urchin_data[keep_rows, ]
+rock_urchin_model_data  <- cca_urchin_model_data %>% filter(!is.na(TYPE))
+rock_urchin_model_data[[type_col]] <- factor(
+  rock_urchin_model_data[[type_col]],
+  levels = c(URCHIN_LABEL, NO_URCHIN_LABEL)
+)
+
+cat("Total rows used:", nrow(rock_urchin_model_data), "\n")
+cat("Class counts:\n")
+print(table(rock_urchin_model_data[[type_col]]))
+
+# Start from raw data
+rock_clean_data <- data.frame(
+  TYPE = gsub(" ", "_", as.character(rock_urchin_data$TYPE)),
+  ACI  = as.numeric(rock_urchin_data$ACI),
+  NDSI = as.numeric(rock_urchin_data$NDSI)
+)
+
+# Remove NAs
+rock_clean_data <- na.omit(rock_clean_data)
+
+# Factor with corrected levels
+rock_clean_data$TYPE <- factor(
+  rock_clean_data$TYPE,
+  levels = c("URCHINS_BARE_ROCK", "NO_URCHINS_BARE_ROCK")
+)
+
+table(rock_clean_data$TYPE)
+nrow(rock_clean_data)
+head(rock_clean_data)
+
+
+# Train SVM
+rock_urchin_svm_model <- kernlab::ksvm(
+  TYPE ~ ACI + NDSI,
+  data       = rock_clean_data,
+  kernel     = "rbfdot",
+  kpar       = list(sigma = 0.25),
+  C          = 1,
+  prob.model = TRUE,
+  scaled     = TRUE
+)
+
+cat("\n--- Model Summary ---\n")
+cat("Kernel:                   Radial Basis Function\n")
+cat("Cost (C):                ", 1, "\n")
+cat("Gamma (sigma):           ", 0.25, "\n")
+cat("Number of Support Vectors:", rock_urchin_svm_model@nSV, "\n")
+
+# Training predictions & confusion matrix
+rock_train_pred <- predict(rock_urchin_svm_model, newdata = rock_clean_data)
+rock_conf_mat   <- table(Actual = rock_clean_data$TYPE, Predicted = rock_train_pred)
+rock_conf_rate  <- prop.table(rock_conf_mat, margin = 1)
+
+cat("\n--- Confusion Matrix (Counts) ---\n")
+print(rock_conf_mat)
+cat("\n--- Confusion Matrix (Predicted Rates) ---\n")
+print(round(rock_conf_rate, 3))
+
+rock_misclass_rate <- 1 - sum(diag(rock_conf_mat)) / sum(rock_conf_mat)
+cat("\nMisclassification Rate:", round(rock_misclass_rate, 7), "\n")
+
+# 5-fold cross validation
+set.seed(123)
+rock_urchin_svm_cv <- kernlab::ksvm(
+  TYPE ~ ACI + NDSI,
+  data       = rock_clean_data,
+  kernel     = "rbfdot",
+  kpar       = list(sigma = 0.25),
+  C          = 1,
+  cross      = 5,
+  scaled     = TRUE
+)
+cat("5-fold CV error:", cross(rock_urchin_svm_cv), "\n")
+cat("5-fold CV accuracy:", 1 - cross(rock_urchin_svm_cv), "\n")
+```
+
+```{r}
+# Create prediction grid over ACI and NDSI ranges
+ACI_range  <- seq(min(rock_clean_data$ACI), max(rock_clean_data$ACI), length.out = 200)
+NDSI_range <- seq(min(rock_clean_data$NDSI), max(rock_clean_data$NDSI), length.out = 200)
+
+rock_grid <- expand.grid(ACI = ACI_range, NDSI = NDSI_range)
+
+# Predict class for each grid point
+rock_grid$pred_class <- predict(rock_urchin_svm_model, newdata = rock_grid)
+
+# Plot
+rock_p_profile <- ggplot(rock_grid, aes(x = NDSI, y = ACI, fill = pred_class)) +
+  geom_raster(interpolate = TRUE, alpha = 0.75) +
+  geom_point(
+    data        = rock_clean_data,
+    aes(x = NDSI, y = ACI, shape = TYPE),
+    inherit.aes = FALSE,
+    size        = 3
+  ) +
+  scale_fill_manual(
+    values = c("URCHINS_BARE_ROCK"    = "#F4CCCC",
+               "NO_URCHINS_BARE_ROCK" = "#C9DAF8"),
+    name   = "Predicted Class",
+    labels = c("URCHINS_BARE_ROCK"    = "Urchins on bare rock",
+               "NO_URCHINS_BARE_ROCK" = "Background noise")
+  ) +
+  scale_shape_manual(
+    values = c("URCHINS_BARE_ROCK"    = 16,
+               "NO_URCHINS_BARE_ROCK" = 17),
+    name   = "Actual Class",
+    labels = c("URCHINS_BARE_ROCK"    = "Urchins on bare rock",
+               "NO_URCHINS_BARE_ROCK" = "Background noise")
+  ) +
+  labs(
+    title = "Response Profile Plot — Bare Rock",
+    x     = "NDSI",
+    y     = "ACI"
+  ) +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "right")
+
+print(rock_p_profile)
+```
+
+### Kelp on Bare Rock SVM
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(kernlab)
+library(here)
+
+# Read in data
+kelp_urchin_data <- read.csv("/Users/aminashenasa/soundscapes_data/data/acoustic_data/filtered_data/Sage_Constraints_Experiment_Kelp Urchin Indices.csv")
+
+# Fix NDSI class
+kelp_urchin_data$NDSI <- as.numeric(kelp_urchin_data$NDSI)
+
+URCHIN_LABEL    <- "URCHINS_KELP"
+NO_URCHIN_LABEL <- "NO URCHINS_KELP"
+predictors      <- c("ACI", "NDSI")
+type_col        <- "TYPE"
+
+# Prep data
+keep_rows              <- complete.cases(kelp_urchin_data[, c(predictors, type_col)])
+kelp_urchin_model_data  <- kelp_urchin_data[keep_rows, ]
+kelp_urchin_model_data  <- kelp_urchin_model_data %>% filter(!is.na(TYPE))
+kelp_urchin_model_data[[type_col]] <- factor(
+  kelp_urchin_model_data[[type_col]],
+  levels = c(URCHIN_LABEL, NO_URCHIN_LABEL)
+)
+
+cat("Total rows used:", nrow(kelp_urchin_model_data), "\n")
+cat("Class counts:\n")
+print(table(kelp_urchin_model_data[[type_col]]))
+
+# Start from raw data
+kelp_clean_data <- data.frame(
+  TYPE = ifelse(kelp_urchin_data$TYPE == "URCHIN_KELP", "URCHIN_KELP", "NO_URCHIN_KELP"),
+  ACI  = as.numeric(kelp_urchin_data$ACI),
+  NDSI = as.numeric(kelp_urchin_data$NDSI)
+)
+
+kelp_clean_data <- na.omit(kelp_clean_data)
+
+kelp_clean_data$TYPE <- factor(
+  kelp_clean_data$TYPE,
+  levels = c("URCHIN_KELP", "NO_URCHIN_KELP")
+)
+
+table(kelp_clean_data$TYPE)
+nrow(kelp_clean_data)
+head(kelp_clean_data)
+
+
+# Train SVM
+kelp_urchin_svm_model <- kernlab::ksvm(
+  TYPE ~ ACI + NDSI,
+  data       = kelp_clean_data,
+  kernel     = "rbfdot",
+  kpar       = list(sigma = 0.25),
+  C          = 1,
+  prob.model = TRUE,
+  scaled     = TRUE
+)
+
+cat("\n--- Model Summary ---\n")
+cat("Kernel:                   Radial Basis Function\n")
+cat("Cost (C):                ", 1, "\n")
+cat("Gamma (sigma):           ", 0.25, "\n")
+cat("Number of Support Vectors:", kelp_urchin_svm_model@nSV, "\n")
+
+# Training predictions & confusion matrix
+kelp_train_pred <- predict(kelp_urchin_svm_model, newdata = kelp_clean_data)
+kelp_conf_mat   <- table(Actual = kelp_clean_data$TYPE, Predicted = kelp_train_pred)
+kelp_conf_rate  <- prop.table(kelp_conf_mat, margin = 1)
+
+cat("\n--- Confusion Matrix (Counts) ---\n")
+print(kelp_conf_mat)
+cat("\n--- Confusion Matrix (Predicted Rates) ---\n")
+print(round(kelp_conf_rate, 3))
+
+kelp_misclass_rate <- 1 - sum(diag(kelp_conf_mat)) / sum(kelp_conf_mat)
+cat("\nMisclassification Rate:", round(kelp_misclass_rate, 7), "\n")
+
+# 5-fold cross validation
+set.seed(123)
+kelp_urchin_svm_cv <- kernlab::ksvm(
+  TYPE ~ ACI + NDSI,
+  data       = kelp_clean_data,
+  kernel     = "rbfdot",
+  kpar       = list(sigma = 0.25),
+  C          = 1,
+  cross      = 5,
+  scaled     = TRUE
+)
+cat("5-fold CV error:", cross(kelp_urchin_svm_cv), "\n")
+cat("5-fold CV accuracy:", 1 - cross(kelp_urchin_svm_cv), "\n")
+```
+
+```{r}
+# Create prediction grid over ACI and NDSI ranges
+ACI_range  <- seq(min(kelp_clean_data$ACI), max(kelp_clean_data$ACI), length.out = 200)
+NDSI_range <- seq(min(kelp_clean_data$NDSI), max(kelp_clean_data$NDSI), length.out = 200)
+
+kelp_grid <- expand.grid(ACI = ACI_range, NDSI = NDSI_range)
+
+# Predict class for each grid point
+kelp_grid$pred_class <- predict(kelp_urchin_svm_model, newdata = kelp_grid)
+
+# Plot
+kelp_p_profile <- ggplot(kelp_grid, aes(x = NDSI, y = ACI, fill = pred_class)) +
+  geom_raster(interpolate = TRUE, alpha = 0.75) +
+  geom_point(
+    data        = kelp_clean_data,
+    aes(x = NDSI, y = ACI, shape = TYPE),
+    inherit.aes = FALSE,
+    size        = 3
+  ) +
+  scale_fill_manual(
+    values = c("URCHIN_KELP"    = "#F4CCCC",
+               "NO_URCHIN_KELP" = "#C9DAF8"),
+    name   = "Predicted Class",
+    labels = c("URCHIN_KELP"    = "Urchins on Kelp",
+               "NO_URCHIN_KELP" = "Background Noise")
+  ) +
+  scale_shape_manual(
+    values = c("URCHIN_KELP"    = 16,
+               "NO_URCHIN_KELP" = 17),
+    name   = "Actual Class",
+    labels = c("URCHIN_KELP"    = "Urchins on Kelp",
+               "NO_URCHIN_KELP" = "Background Noise")
+  ) +
+  labs(
+    title = "Response Profile Plot — Kelp",
+    x     = "NDSI",
+    y     = "ACI"
+  ) +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "right")
+
+print(kelp_p_profile)
+```
+
+### Principle component with all 3 SVMs
+
+```{r}
+library(ggplot2)
+
+# Combine all three datasets with a substrate label
+pca_data <- rbind(
+  data.frame(cca_clean_data,  substrate = "CCA"),
+  data.frame(rock_clean_data, substrate = "Bare Rock"),
+  data.frame(kelp_clean_data, substrate = "Kelp")
+)
+
+# Run PCA on ACI and NDSI
+pca_result <- prcomp(pca_data[, c("ACI", "NDSI")], scale. = TRUE)
+
+summary(pca_result)
+
+# Build plotting dataframe
+pca_scores <- as.data.frame(pca_result$x)
+pca_scores$substrate <- pca_data$substrate
+pca_scores$TYPE      <- pca_data$TYPE
+
+# Plot
+ggplot(pca_scores, aes(x = PC1, y = PC2, color = substrate, shape = TYPE)) +
+  geom_point(size = 3, alpha = 0.8) +
+  stat_ellipse(aes(group = substrate), level = 0.95, linetype = "dashed") +
+  scale_color_manual(values = c(
+    "CCA"       = "#E69F00",
+    "Bare Rock" = "#0072B2",
+    "Kelp"      = "#009E73"
+  )) +
+  theme_classic() +
+  labs(
+    title    = "PCA of Urchin Grazing Acoustic Indices",
+    x        = paste0("PC1 (", round(summary(pca_result)$importance[2,1]*100, 1), "% variance)"),
+    y        = paste0("PC2 (", round(summary(pca_result)$importance[2,2]*100, 1), "% variance)"),
+    color    = "Substrate",
+    shape    = "Class"
+  ) +
+  theme(legend.position = "right")
+head(kelp_probs)
 ```
