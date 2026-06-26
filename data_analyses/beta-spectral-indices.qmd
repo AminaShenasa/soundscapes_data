@@ -1,0 +1,604 @@
+---
+title: "beta-spectral-indices"
+format: html
+editor: visual
+---
+
+### Loading Acoustic Data
+
+```{r}
+library(seewave)
+library(tuneR)
+library(dplyr)
+
+# Define base paths for each habitat type
+forest_base <- "/Volumes/1 Backup/Soundscapes_Summer25_AS/Acoustic_Indices/WAV_Chunks/Macro_Forest"
+barren_base <- "/Volumes/1 Backup/Soundscapes_Summer25_AS/Acoustic_Indices/WAV_Chunks/Urchin_Barren"
+
+# Define sites with their habitat type and subfolder
+site_info <- data.frame(
+  site = c("Battery_Island", "Crow_Island", "Middle_Island",
+           "Harris_Island", "Samsing_Cove", "Sandy_Cove"),
+  habitat = c("Macro_Forest", "Macro_Forest", "Macro_Forest",
+              "Urchin_Barren", "Urchin_Barren", "Urchin_Barren"),
+  subfolder = c("HydroMoth_0",   # Battery_Island
+                "HydroMoth_0.5", # Crow_Island 
+                "HydroMoth_2",   # Middle_Island 
+                "HydroMoth_12",    # Harris_Island 
+                "HydroMoth_6",    # Samsing_Cove 
+                "HydroMoth_15"),   # Sandy_Cove 
+  stringsAsFactors = FALSE
+)
+
+# Build full paths automatically
+site_info <- site_info %>%
+  mutate(
+    base = ifelse(habitat == "Macro_Forest", forest_base, barren_base),
+    full_path = file.path(base, site, subfolder)
+  )
+
+# Check all paths exist before running
+site_info$path_exists <- sapply(site_info$full_path, dir.exists)
+print(site_info[, c("site", "habitat", "full_path", "path_exists")])
+```
+
+### Temporal Entropy
+
+```{r}
+calc_site_ht <- function(site_name, base_dir, n_sample = NULL) {
+  
+  # Get all wav files for this site
+  site_path <- file.path(base_dir, site_name)
+  files <- list.files(site_path, pattern = "\\.wav$", 
+                      full.names = TRUE, recursive = TRUE)
+  
+
+  # Calculate Ht for each file
+  ht_values <- sapply(files, function(f) {
+    tryCatch({
+      wav <- readWave(f)
+      envelope <- env(wav, f = wav@samp.rate, plot = FALSE)
+      th(envelope)
+    }, error = function(e) {
+      cat("  Error on:", basename(f), "\n")
+      return(NA)
+    })
+  }, USE.NAMES = FALSE)
+  
+  # Return summary
+  data.frame(
+    site = site_name,
+    n_files = length(files),
+    n_success = sum(!is.na(ht_values)),
+    Ht_mean = mean(ht_values, na.rm = TRUE),
+    Ht_sd = sd(ht_values, na.rm = TRUE),
+    Ht_median = median(ht_values, na.rm = TRUE)
+  )
+}
+```
+
+```{r}
+library(readr)
+# Core function — stratified by hour, 10 files per hour
+calc_ht_stratified <- function(site_name, full_path, files_per_hour = 10) {
+  
+  cat("\n=============================\n")
+  cat("Processing:", site_name, "\n")
+  cat("Path:", full_path, "\n")
+  
+  # Get all wav files
+  files <- list.files(full_path, pattern = "\\.wav$", 
+                      full.names = TRUE, recursive = TRUE)
+  
+  if (length(files) == 0) {
+    cat("  WARNING: No wav files found!\n")
+    return(NULL)
+  }
+  
+  cat("  Total files found:", length(files), "\n")
+  
+  # Extract hour from filename (format: YYYYMMDD_HHMMSS)
+  hours <- as.integer(substr(gsub(".*_(\\d{6})_.*", "\\1", 
+                                   basename(files)), 1, 2))
+  
+  file_df <- data.frame(path = files, hour = hours)
+  
+  # Sample 10 files per hour
+  sampled <- file_df %>%
+    group_by(hour) %>%
+    slice_sample(n = files_per_hour) %>%
+    ungroup()
+  
+  cat("  Sampled files:", nrow(sampled), 
+      "across", n_distinct(sampled$hour), "hours\n")
+  
+  # Calculate Ht for each sampled file
+  results <- lapply(1:nrow(sampled), function(i) {
+    f <- sampled$path[i]
+    tryCatch({
+      wav <- readWave(f)
+      envelope <- env(wav, f = wav@samp.rate, plot = FALSE)
+      ht <- th(envelope)
+      data.frame(site = site_name, hour = sampled$hour[i],
+                 file = basename(f), Ht = ht)
+    }, error = function(e) {
+      cat("  Error:", basename(f), "-", e$message, "\n")
+      data.frame(site = site_name, hour = sampled$hour[i],
+                 file = basename(f), Ht = NA)
+    })
+  })
+  
+  bind_rows(results)
+}
+
+# Run all 6 sites, saving after each one
+all_results <- list()
+
+for (i in 1:nrow(site_info)) {
+  site_results <- calc_ht_stratified(
+    site_name = site_info$site[i],
+    full_path = site_info$full_path[i],
+    files_per_hour = 10
+  )
+  
+  all_results[[site_info$site[i]]] <- site_results
+  
+  # Save after each site in case of crashes
+  write_csv(bind_rows(all_results), "Ht_results_progress.csv")
+  cat("  Saved progress for", site_info$site[i], "\n")
+}
+
+# Final summary per site
+summary_results <- bind_rows(all_results) %>%
+  group_by(site) %>%
+  summarise(
+    n_files   = n(),
+    Ht_mean   = mean(Ht, na.rm = TRUE),
+    Ht_sd     = sd(Ht, na.rm = TRUE),
+    Ht_median = median(Ht, na.rm = TRUE)
+  )
+
+print(summary_results)
+write_csv(summary_results, "Ht_summary_by_site.csv")
+write_csv(bind_rows(all_results), "Ht_all_files.csv")
+```
+
+```{r}
+# Check what's in it
+class(all_results)
+
+# Force convert to data frame
+all_results <- do.call(rbind, all_results)
+
+# Verify
+class(all_results)
+nrow(all_results)
+head(all_results)
+# Add habitat column
+all_results <- all_results %>%
+  mutate(habitat = case_when(
+    site %in% c("Battery_Island", "Crow_Island", "Middle_Island") ~ "Macro_Forest",
+    site %in% c("Harris_Island", "Samsing_Cove", "Sandy_Cove")   ~ "Urchin_Barren"
+  ))
+
+# Save the clean combined file
+write.csv(all_results, "~/soundscapes_data/Ht_all_sites.csv", row.names = FALSE)
+```
+
+```{r}
+i <- 6  # Sandy_Cove
+
+site_result <- calc_ht_stratified(
+  site_name = site_info$site[i],
+  full_path = site_info$full_path[i],
+  files_per_hour = 10
+)
+
+# Save Sandy Cove results
+write.csv(site_result,
+          "~/soundscapes_data/Ht_Sandy_Cove.csv",
+          row.names = FALSE)
+
+cat("\nDone! Rows:", nrow(site_result), "\n")
+```
+
+```{r}
+# Save each site separately
+for (s in unique(all_results$site)) {
+  site_data <- all_results[all_results$site == s, ]
+  write.csv(site_data,
+            paste0("Ht_", s, ".csv"),
+            row.names = FALSE)
+  cat("Saved:", s, "-", nrow(site_data), "rows\n")
+}
+```
+
+```{r}
+# Load all sites, Sandy Cove from the correct location
+all_results <- do.call(rbind, lapply(sites, function(s) {
+  # Use soundscapes_data path for Sandy Cove, working dir for others
+  f <- if (s == "Sandy_Cove") {
+    "~/soundscapes_data/Ht_Sandy_Cove.csv"
+  } else {
+    paste0("Ht_", s, ".csv")
+  }
+  if (file.exists(f)) {
+    read.csv(f)
+  } else {
+    cat("Missing:", f, "\n")
+    NULL
+  }
+}))
+
+# Add habitat
+all_results <- all_results %>%
+  mutate(habitat = case_when(
+    site %in% c("Battery_Island", "Crow_Island", "Middle_Island") ~ "Macro_Forest",
+    site %in% c("Harris_Island",  "Samsing_Cove", "Sandy_Cove")  ~ "Urchin_Barren"
+  ))
+
+cat("Total rows:", nrow(all_results), "\n")
+table(all_results$site)
+
+# Save combined to working directory
+write.csv(all_results, "Ht_all_sites.csv", row.names = FALSE)
+
+# Also copy correct Sandy Cove to working directory for future use
+file.copy("~/soundscapes_data/Ht_Sandy_Cove.csv", "Ht_Sandy_Cove.csv", overwrite = TRUE)
+```
+
+```{r}
+# Extract date and datetime from filename
+all_results <- all_results %>%
+  mutate(
+    date     = as.Date(gsub(".*_(\\d{8})_.*", "\\1", file), format = "%Y%m%d"),
+    datetime = as.POSIXct(paste(date, sprintf("%02d:00:00", hour)),
+                          format = "%Y-%m-%d %H:%M:%S")
+  )
+
+# Check dates
+cat("Date range:", as.character(min(all_results$date)),
+    "to", as.character(max(all_results$date)), "\n")
+
+# Filter to matching time window
+all_results <- all_results %>%
+  mutate(
+    date     = as.Date(gsub(".*_(\\d{8})_.*", "\\1", file), format = "%Y%m%d"),
+    datetime = as.POSIXct(paste(date, sprintf("%02d:00:00", hour)),
+                          format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+  ) %>%
+  filter(datetime >= as.POSIXct("2025-07-23 23:59:43", tz = "UTC"),
+         datetime <= as.POSIXct("2025-07-28 23:59:32", tz = "UTC"))
+
+cat("Rows after filtering:", nrow(all_results), "\n")
+cat("Date range:", as.character(min(all_results$datetime)),
+    "to", as.character(max(all_results$datetime)), "\n")
+table(all_results$site)
+
+# Plot
+ggplot(all_results, aes(x = datetime, y = Ht, color = site)) +
+  stat_summary(fun = mean, geom = "line", linewidth = 0.8) +
+  facet_wrap(~ habitat, ncol = 1,
+             labeller = as_labeller(c(
+               "Macro_Forest"  = "Macro Forest",
+               "Urchin_Barren" = "Urchin Barren"
+             ))) +
+  scale_x_datetime(date_breaks = "12 hours",
+                   date_labels = "%b %d\n%H:%M") +
+  labs(
+    title = "Temporal Entropy (Ht) Over 5 Days",
+    x     = "Date and Time (Sitka Local Time)",
+    y     = "Temporal Entropy (Ht)",
+    color = "Site",
+    fill  = "Site"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text  = element_text(face = "bold", size = 12)
+  )
+```
+
+### Loading in Kaleidoscope Spectral Measurements
+
+```{r}
+# List all CSVs recursively through site subfolders
+files <- list.files(
+  "/Users/aminashenasa/soundscapes_data/data/acoustic_data/spectral_measurements/",
+  pattern = "\\.csv$",
+  full.names = TRUE,
+  recursive = TRUE  # <-- this is the key
+)
+
+cat("Files found:\n")
+print(files)
+
+# Stack them all
+all_spectral <- do.call(rbind, lapply(files, read.csv))
+
+cat("Total rows:", nrow(all_spectral), "\n")
+cat("Sites:", unique(all_spectral$SITE), "\n")
+
+# Save combined
+write.csv(all_spectral,
+          "/Users/aminashenasa/soundscapes_data/data/acoustic_data/spectral_measurements_combined.csv",
+          row.names = FALSE)
+```
+
+```{r}
+# Parse datetime from the kaleidoscope columns
+all_spectral <- all_spectral %>%
+  mutate(
+    datetime = as.POSIXct(paste(DATE..UTC., TIME..UTC.),
+                          format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+  ) %>%
+  filter(datetime >= as.POSIXct("2025-07-23 23:59:43", tz = "UTC"),
+         datetime <= as.POSIXct("2025-07-28 23:59:32", tz = "UTC"))
+
+cat("Rows after filtering:", nrow(all_spectral), "\n")
+cat("Date range:", as.character(min(all_spectral$datetime)),
+    "to", as.character(max(all_spectral$datetime)), "\n")
+table(all_spectral$SITE)
+```
+
+```{r}
+library(ggplot2)
+# Extract date and datetime
+all_spectral <- all_spectral %>%
+  mutate(
+    date     = as.Date(gsub(".*_(\\d{8})_.*", "\\1", IN.FILE), format = "%Y%m%d"),
+    datetime = as.POSIXct(paste(DATE..UTC., TIME..UTC.),
+                          format = "%Y-%m-%d %H:%M:%S", tz = "UTC"),
+    habitat  = case_when(
+      SITE %in% c("Battery_Island", "Crow_Island", "Middle_Island") ~ "Macro Forest",
+      SITE %in% c("Harris_Island",  "Samsing_Cove", "Sandy_Cove")  ~ "Urchin Barren"
+    )
+  )
+
+# Pivot to long format so we can facet by measurement
+library(tidyr)
+
+spectral_long <- all_spectral %>%
+  select(SITE, habitat, datetime, MEAN, SD, MEDIAN, MODE, 
+         Q25, Q75, IQR, SKEW, KURT, SFM, SH) %>%
+  pivot_longer(cols = c(MEAN, SD, MEDIAN, MODE, Q25, Q75, 
+                        IQR, SKEW, KURT, SFM, SH),
+               names_to  = "metric",
+               values_to = "value")
+
+metrics <- c("MEAN", "SD", "MEDIAN", "MODE", "Q25", "Q75", 
+             "IQR", "SKEW", "KURT", "SFM", "SH")
+
+for (m in metrics) {
+  p <- ggplot(all_spectral, aes(x = datetime, y = .data[[m]], color = SITE)) +
+    stat_summary(fun = mean, geom = "line", linewidth = 0.8) +
+    stat_summary(fun.data = mean_se, geom = "ribbon",
+                 aes(fill = SITE), alpha = 0.15, color = NA) +
+    facet_wrap(~ habitat, ncol = 1) +
+    scale_x_datetime(date_breaks = "12 hours",
+                     date_labels = "%b %d\n%H:%M") +
+    labs(
+      title = paste("Spectral Index:", m),
+      x     = "Date (UTC)",
+      y     = m,
+      color = "Site",
+      fill  = "Site"
+    ) +
+    theme_bw() +
+    theme(
+      axis.text.x    = element_text(angle = 45, hjust = 1),
+      strip.text     = element_text(face = "bold", size = 12),
+      legend.position = "bottom"
+    )
+  
+  ggsave(paste0("plot_", m, ".png"), p, width = 8, height = 6, dpi = 300)
+  cat("Saved:", paste0("plot_", m, ".png"), "\n")
+}
+```
+
+```{r}
+# Add date and hour to spectral data
+all_spectral <- all_spectral %>%
+  mutate(
+    date = as.Date(datetime, tz = "UTC"),
+    hour = as.integer(format(datetime, "%H"))
+  )
+
+# Subsample 10 per hour per site per date to match Ht sampling
+set.seed(123)  # for reproducibility
+spectral_sampled <- all_spectral %>%
+  group_by(SITE, date, hour) %>%
+  slice_sample(n = 10) %>%
+  ungroup()
+
+cat("Rows:", nrow(spectral_sampled), "\n")
+table(spectral_sampled$SITE)
+```
+
+```{r}
+# Filter Ht to same time window
+ht_hourly <- read.csv("Ht_all_sites.csv") %>%
+  rename(SITE = site) %>%
+  mutate(
+    date     = as.Date(gsub(".*_(\\d{8})_.*", "\\1", file), format = "%Y%m%d"),
+    datetime = as.POSIXct(paste(date, sprintf("%02d:00:00", hour)),
+                          format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+  ) %>%
+  filter(datetime >= as.POSIXct("2025-07-23 23:59:43", tz = "UTC"),
+         datetime <= as.POSIXct("2025-07-28 23:59:32", tz = "UTC")) %>%
+  group_by(SITE, date, hour) %>%
+  summarise(Ht = mean(Ht, na.rm = TRUE), .groups = "drop")
+
+cat("Ht rows after filtering:", nrow(ht_hourly), "\n")
+table(ht_hourly$SITE)
+
+# Rejoin with spectral
+combined <- left_join(spectral_sampled, ht_hourly,
+                      by = c("SITE", "date", "hour"))
+
+cat("Combined rows:", nrow(combined), "\n")
+cat("NAs in Ht:", sum(is.na(combined$Ht)), "\n")
+table(combined$SITE)
+```
+
+```{r}
+# Step 1 — filter spectral to time window first
+spectral_filtered <- all_spectral %>%
+  filter(datetime >= as.POSIXct("2025-07-23 23:59:43", tz = "UTC"),
+         datetime <= as.POSIXct("2025-07-28 23:59:32", tz = "UTC")) %>%
+  mutate(date = as.Date(datetime, tz = "UTC"),
+         hour = as.integer(format(datetime, "%H")))
+
+cat("Spectral rows after filter:", nrow(spectral_filtered), "\n")
+table(spectral_filtered$SITE)
+
+# Step 2 — subsample 10 per site/date/hour
+set.seed(123)
+spectral_sampled <- spectral_filtered %>%
+  group_by(SITE, date, hour) %>%
+  slice_sample(n = 10) %>%
+  ungroup()
+
+cat("Sampled rows:", nrow(spectral_sampled), "\n")
+table(spectral_sampled$SITE)
+
+# Step 3 — rejoin with filtered Ht
+combined <- left_join(spectral_sampled, ht_hourly,
+                      by = c("SITE", "date", "hour"))
+
+cat("Combined rows:", nrow(combined), "\n")
+cat("NAs in Ht:", sum(is.na(combined$Ht)), "\n")
+table(combined$SITE)
+```
+
+```{r}
+# Load Ht with filenames
+ht_files <- read.csv("Ht_all_sites.csv") %>%
+  rename(SITE = site) %>%
+  mutate(
+    datetime = as.POSIXct(paste(
+      as.Date(gsub(".*_(\\d{8})_.*", "\\1", file), format = "%Y%m%d"),
+      sprintf("%02d:00:00", hour)),
+      format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+  ) %>%
+  filter(datetime >= as.POSIXct("2025-07-23 23:59:43", tz = "UTC"),
+         datetime <= as.POSIXct("2025-07-28 23:59:32", tz = "UTC"))
+
+cat("Ht files in time window:", nrow(ht_files), "\n")
+table(ht_files$SITE)
+
+# Check what the filename looks like in Ht vs spectral
+head(ht_files$file)
+head(all_spectral$IN.FILE)
+```
+
+```{r}
+# Join spectral to Ht matched files by filename
+combined <- inner_join(
+  all_spectral,
+  ht_files %>% select(SITE, file, Ht, hour) %>% rename(IN.FILE = file),
+  by = c("SITE", "IN.FILE")
+)
+
+cat("Combined rows:", nrow(combined), "\n")
+cat("NAs in Ht:", sum(is.na(combined$Ht)), "\n")
+table(combined$SITE)
+```
+
+```{r}
+# Check site names in each dataset
+unique(all_spectral$SITE)
+unique(ht_files$SITE)
+
+# Check if Samsing and Sandy are in ht_files
+ht_files %>% filter(SITE %in% c("Samsing_Cove", "Sandy_Cove")) %>% 
+  select(SITE, file) %>% head()
+
+# Check if they're in all_spectral
+all_spectral %>% filter(SITE %in% c("Samsing_Cove", "Sandy_Cove")) %>%
+  select(SITE, IN.FILE) %>% head()
+```
+
+```{r}
+# Extract just the recorder ID and timestamp for matching
+ht_files <- ht_files %>%
+  mutate(file_key = gsub("_000\\.wav$", "", file))  # remove _000.wav
+
+all_spectral <- all_spectral %>%
+  mutate(file_key = gsub("\\.WAV$", "", IN.FILE))    # remove .WAV
+
+# Check they now match
+head(ht_files$file_key)
+head(all_spectral %>% filter(SITE == "Samsing_Cove") %>% pull(file_key))
+```
+
+```{r}
+# Compare recorder IDs by site
+ht_files %>%
+  mutate(recorder = gsub("_.*", "", file)) %>%
+  group_by(SITE, recorder) %>%
+  summarise(n = n(), .groups = "drop")
+
+all_spectral %>%
+  mutate(recorder = gsub("_.*", "", IN.FILE)) %>%
+  group_by(SITE, recorder) %>%
+  summarise(n = n(), .groups = "drop")
+```
+
+```{r}
+# Check actual WAV filenames on disk for Samsing
+list.files("/Volumes/1 Backup/Soundscapes_Summer25_AS/Acoustic_Indices/WAV_Chunks/Urchin_Barren/Samsing_Cove/HydroMoth_6/",
+           pattern = "\\.wav$") %>% head(6)
+
+# And Sandy
+list.files("/Volumes/1 Backup/Soundscapes_Summer25_AS/Acoustic_Indices/WAV_Chunks/Urchin_Barren/Sandy_Cove/HydroMoth_15/",
+           pattern = "\\.wav$") %>% head(6)
+
+# Compare to what Ht has for those sites
+ht_files %>% filter(SITE == "Samsing_Cove") %>% pull(file) %>% head(6)
+ht_files %>% filter(SITE == "Sandy_Cove") %>% pull(file) %>% head(6)
+```
+
+```{r}
+# For all sites - match on SITE + hour + date
+# First fix date and hour extraction for spectral
+all_spectral <- all_spectral %>%
+  mutate(
+    # Extract date from the datetime column we already have
+    date = as.Date(datetime, tz = "UTC"),
+    hour = as.integer(format(datetime, "%H"))
+  )
+
+# Summarise Ht to one value per site/date/hour
+ht_hourly <- ht_files %>%
+  mutate(
+    date = as.Date(gsub(".*_(\\d{8})_.*", "\\1", file), format = "%Y%m%d"),
+  ) %>%
+  group_by(SITE, date, hour) %>%
+  summarise(Ht = mean(Ht, na.rm = TRUE), .groups = "drop")
+
+# For Battery, Crow, Harris, Middle — match by exact filename
+# For Samsing, Sandy — match by site/date/hour
+combined_exact <- inner_join(
+  all_spectral %>% filter(SITE %in% c("Battery_Island", "Crow_Island",
+                                       "Harris_Island", "Middle_Island")),
+  ht_files %>% select(SITE, file, Ht) %>% rename(IN.FILE = file),
+  by = c("SITE", "IN.FILE")
+)
+
+combined_hourly <- left_join(
+  all_spectral %>% filter(SITE %in% c("Samsing_Cove", "Sandy_Cove")) %>%
+    group_by(SITE, date, hour) %>%
+    slice_sample(n = 10) %>%
+    ungroup(),
+  ht_hourly %>% filter(SITE %in% c("Samsing_Cove", "Sandy_Cove")),
+  by = c("SITE", "date", "hour")
+)
+
+# Combine both
+combined <- bind_rows(combined_exact, combined_hourly)
+
+cat("Combined rows:", nrow(combined), "\n")
+cat("NAs in Ht:", sum(is.na(combined$Ht)), "\n")
+table(combined$SITE)
+```

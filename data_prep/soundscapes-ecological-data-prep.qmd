@@ -15,7 +15,7 @@ Transforming forested sites to long format
 ```{r}
 #reading in forest upc data
 library(here)
-upc_forests <- read.csv("data/ecological_data/Summer_Soundscapes_UPC_Forests - data_filtered.csv")
+upc_forests <- read.csv("/Users/aminashenasa/soundscapes_data/data/ecological_data/Summer_Soundscapes_UPC_Forests - data_filtered.csv")
 
 #checking column names
 names(upc_forests)
@@ -81,7 +81,7 @@ old_long_upc_forests <- upc_forests %>%
     CATEGORY
   )
 # saving file to cleaned_data folder
-write_csv(old_long_upc_forests, "data/ecological_data/cleaned_data/old_long_upc_forests.csv")
+write_csv(old_long_upc_forests, "/Users/aminashenasa/soundscapes_data/data/ecological_data/cleaned_data/long_upc_forests.csv")
 
 #tidying CLASSCODE column and adding in NAME column
 
@@ -92,8 +92,35 @@ Renaming barren file to match long forest file
 ```{r}
 library(here)
 #renaming file
-long_upc_barrens <- read.csv("data/ecological_data/Summer_Soundscapes_UPC_barrens - data_filtered.csv")
+long_upc_barrens <- read.csv("/Users/aminashenasa/soundscapes_data/data/ecological_data/Summer_Soundscapes_UPC_barrens - data_filtered.csv")
 
 # saving file to cleaned_data folder
-write_csv(long_upc_barrens, "data/ecological_data/cleaned_data/long_upc_barrens.csv")
+write_csv(long_upc_barrens, "/Users/aminashenasa/soundscapes_data/data/ecological_data/cleaned_data/long_upc_barrens.csv")
+```
+
+### Algae and Invert Swath
+
+```{r}
+full_algae_invert_swath <- read.csv("/Users/aminashenasa/soundscapes_data/data/ecological_data/Summer_Soundscapes_Algae_Invert_data.csv")
+
+# Filter to only BARREN and MACRO, excluding Samsing Forest
+filtered_algae_invert_swath <- full_algae_invert_swath %>% 
+  filter(TYPE %in% c("BARREN", "MACRO")) %>%
+  filter(SITE != "SAMSING FOREST")
+
+filtered_algae_invert_swath$TYPE     <- factor(filtered_algae_invert_swath$TYPE,     levels = c("BARREN", "MACRO"))
+filtered_algae_invert_swath$SITE     <- factor(filtered_algae_invert_swath$SITE)
+filtered_algae_invert_swath$TRANSECT <- factor(filtered_algae_invert_swath$TRANSECT)
+filtered_algae_invert_swath$SEGMENT  <- factor(filtered_algae_invert_swath$`SEGMENT`)
+
+# Drop the empty column (Unnamed: 46) and build community matrix
+species_cols <- names(filtered_algae_invert_swath)[2:46]  # named indexing is safer than positional
+
+comm <- filtered_algae_invert_swath %>%
+  select(all_of(species_cols)) %>%
+  mutate(across(everything(), as.numeric))
+```
+
+```{r}
+names(filtered_algae_invert_swath)
 ```

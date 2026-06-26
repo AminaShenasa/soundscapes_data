@@ -15,8 +15,7 @@ of activity
 
 By evaluating how traditional ecological indicators can be predicted by acoustic metrics in assessing kelp forest health, and how these ecological variables interrelate and manifest acoustically, this study explores how integrating soundscape data with traditional monitoring may enhance our ability to detect and respond to ecological change, ultimately improving ecosystem management and conservation efforts.
 
-Thesis Title: Beyond the Visual: Detecting Ecosystem Transitions Through Soundscapes
-
+Thesis Title: Beyond the Visual: Detecting Ecosystem Transitions Through Soundsca
 Abstract:
 Understanding how ecosystem states shift and identifying early signs of those
 transitions are critical for effective conservation. In kelp forest ecosystems, the collapse

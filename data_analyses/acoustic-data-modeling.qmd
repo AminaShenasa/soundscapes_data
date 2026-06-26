@@ -773,45 +773,67 @@ print(kelp_p_profile)
 
 ### Principle component with all 3 SVMs
 
-```{r}
-library(ggplot2)
+To combine urchin acoustic svms into one synthetic variable, first they must be pushed through the general habitat acoustics to create probabilities for each
 
-# Combine all three datasets with a substrate label
-pca_data <- rbind(
-  data.frame(cca_clean_data,  substrate = "CCA"),
-  data.frame(rock_clean_data, substrate = "Bare Rock"),
-  data.frame(kelp_clean_data, substrate = "Kelp")
+```{r}
+# Step 1 — predict all three urchin SVMs onto full model_data
+cca_probs_full  <- predict(cca_urchin_svm_model,  newdata = data.frame(
+                              ACI  = model_data$ACI,
+                              NDSI = model_data$NDSI), 
+                            type = "probabilities")[, "URCHIN_CCA"]
+
+rock_probs_full <- predict(rock_urchin_svm_model, newdata = data.frame(
+                              ACI  = as.numeric(model_data$ACI),
+                              NDSI = as.numeric(model_data$NDSI)),
+                            type = "probabilities")[, "URCHINS_BARE_ROCK"]
+
+kelp_probs_full <- predict(kelp_urchin_svm_model, newdata = data.frame(
+                              ACI  = model_data$ACI,
+                              NDSI = model_data$NDSI),
+                            type = "probabilities")[, "URCHIN_KELP"]
+
+# Step 2 — combine into one dataframe and run PCA
+urchin_prob_df <- data.frame(
+  cca_prob  = cca_probs_full,
+  rock_prob = rock_probs_full,
+  kelp_prob = kelp_probs_full
 )
 
-# Run PCA on ACI and NDSI
-pca_result <- prcomp(pca_data[, c("ACI", "NDSI")], scale. = TRUE)
+urchin_pca  <- prcomp(urchin_prob_df, scale. = TRUE)
+summary(urchin_pca)
 
-summary(pca_result)
+# Step 3 — extract PC1 (negating pc1 as well)
+pc1_scores <- -urchin_pca$x[, "PC1"]
 
-# Build plotting dataframe
-pca_scores <- as.data.frame(pca_result$x)
-pca_scores$substrate <- pca_data$substrate
-pca_scores$TYPE      <- pca_data$TYPE
+# Step 4 — get habitat SVM probabilities for full model_data
+habitat_probs <- predict(habitat_svm_model, newdata = habitat_model_data, type = "probabilities")
+prob_barren_all <- habitat_probs[, "Barren"]
+
+# Step 5 — regress and plot
+pc1_df <- data.frame(
+  pc1         = pc1_scores,
+  prob_barren = prob_barren_all
+)
+
+lm_pc1 <- lm(prob_barren ~ pc1, data = pc1_df)
+summary(lm_pc1)
 
 # Plot
-ggplot(pca_scores, aes(x = PC1, y = PC2, color = substrate, shape = TYPE)) +
-  geom_point(size = 3, alpha = 0.8) +
-  stat_ellipse(aes(group = substrate), level = 0.95, linetype = "dashed") +
-  scale_color_manual(values = c(
-    "CCA"       = "#E69F00",
-    "Bare Rock" = "#0072B2",
-    "Kelp"      = "#009E73"
-  )) +
+ggplot(pc1_df, aes(x = pc1, y = prob_barren)) +
+  geom_smooth(method = "lm", color = "steelblue", se = FALSE, linewidth = 1) +
+  annotate("text",
+           x     = min(pc1_df$pc1),
+           y     = max(pc1_df$prob_barren),
+           label = paste0("R² = ", round(summary(lm_pc1)$r.squared, 3),
+                          ", P = ", format(summary(lm_pc1)$coefficients[2, 4],
+                                           scientific = TRUE, digits = 2)),
+           hjust = 0, vjust = 1.5, size = 4.5) +
   theme_classic() +
   labs(
-    title    = "PCA of Urchin Grazing Acoustic Indices",
-    x        = paste0("PC1 (", round(summary(pca_result)$importance[2,1]*100, 1), "% variance)"),
-    y        = paste0("PC2 (", round(summary(pca_result)$importance[2,2]*100, 1), "% variance)"),
-    color    = "Substrate",
-    shape    = "Class"
+    x = "More Urchin Noise (PC1)",
+    y = "Probability of Assignment as Urchin Barrens (SVM)"
   ) +
-  theme(legend.position = "right")
-head(kelp_probs)
+  theme(axis.title.x = element_text(size = 12, face = "bold"))
 ```
 
 ## Acoustic and Ecological Relationships
@@ -825,7 +847,7 @@ library(here)
 # Read in ecological data
 eco_data <- read.csv("/Users/aminashenasa/soundscapes_data/data/ecological_data/ecological_variables_summary.csv")
 
-# Clean column names for easier use
+# Clean column names
 eco_data <- eco_data %>%
   rename(
     red_urchin_biomass  = `Mean.Mean.Red.Urchin.Biomass...m2.`,
@@ -834,68 +856,846 @@ eco_data <- eco_data %>%
     green_urchin_density = `Mean.Strongylocentrotus..green.urchin.m.2.`
   )
 
-# Get mean SVM probability per site from habitat_model_data
-prob_by_site <- habitat_model_data %>%
+# Step 1 - add prob to model_data
+model_data$prob_barren <- prob_barren_all
+
+# Step 2 - mean per site
+prob_by_site <- model_data %>%
   group_by(SITE) %>%
   summarise(mean_prob = mean(prob_barren, na.rm = TRUE))
 
-# Standardize site names to match between datasets
-prob_by_site$SITE <- gsub(" ", "_", prob_by_site$SITE)
-
-# Join with ecological data
+# Step 3 - join
 regression_data <- left_join(prob_by_site, eco_data, by = "SITE")
 
-print(regression_data)
+# Step 4 - confirm before running regression
+print(regression_data[, c("SITE", "mean_prob")])
 
-# Stepwise multiple regression
+# Step 5 - only run regression after confirming values look right
+null_model <- lm(mean_prob ~ 1, data = regression_data)
 full_model <- lm(
   mean_prob ~ red_urchin_density + red_urchin_biomass +
               green_urchin_density + stipe_density,
   data = regression_data
 )
-
-# Stepwise selection (both directions)
-step_model <- step(full_model, direction = "both")
-
-summary(step_model)
+step_model_bic <- step(
+  null_model,
+  scope     = list(lower = null_model, upper = full_model),
+  direction = "forward",
+  k         = log(nrow(regression_data))
+)
+summary(step_model_bic)
 ```
 
 ```{r}
 library(ggplot2)
 library(patchwork)
+library(ggrepel)
 
-# Individual scatter plots with lm line
-p_red_density <- ggplot(regression_data, aes(x = red_urchin_density, y = mean_prob, color = TYPE)) +
-  geom_point(size = 3) +
-  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 0.8) +
-  scale_color_manual(values = c("Barren" = "red", "Macro_Forest" = "blue")) +
-  theme_classic() +
-  labs(x = "Red urchin density (m²)", y = "SVM probability (Barren)", color = "Habitat")
+# Helper function to get R² and p for each variable
+get_stats <- function(x, y) {
+  fit <- summary(lm(y ~ x))
+  r2  <- round(fit$r.squared, 3)
+  p   <- round(fit$coefficients[2, 4], 3)
+  paste0("R² = ", r2, ", p = ", p)
+}
 
-p_red_biomass <- ggplot(regression_data, aes(x = red_urchin_biomass, y = mean_prob, color = TYPE)) +
-  geom_point(size = 3) +
-  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 0.8) +
-  scale_color_manual(values = c("Barren" = "red", "Macro_Forest" = "blue")) +
-  theme_classic() +
-  labs(x = "Red urchin biomass (m²)", y = "SVM probability (Barren)", color = "Habitat")
+make_panel <- function(data, xvar, xlabel) {
+  stats_label <- get_stats(data[[xvar]], data$mean_prob)
+  ggplot(data, aes(x = .data[[xvar]], y = mean_prob, color = TYPE)) +
+    geom_point(size = 3) +
+    geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 0.8) +
+    geom_text_repel(aes(label = SITE), size = 2.5, show.legend = FALSE) +
+    annotate("text", x = -Inf, y = Inf, label = stats_label,
+             hjust = -0.1, vjust = 1.5, size = 3.5) +
+    scale_color_manual(values = c("Barren" = "red", "Macro_Forest" = "blue")) +
+    theme_classic() +
+    labs(x = xlabel, y = "SVM probability (Barren)", color = "Habitat")
+}
 
-p_green_density <- ggplot(regression_data, aes(x = green_urchin_density, y = mean_prob, color = TYPE)) +
-  geom_point(size = 3) +
-  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 0.8) +
-  scale_color_manual(values = c("Barren" = "red", "Macro_Forest" = "blue")) +
-  theme_classic() +
-  labs(x = "Green urchin density (m²)", y = "SVM probability (Barren)", color = "Habitat")
+p_red_density  <- make_panel(regression_data, "red_urchin_density",  "Red urchin density (m²)")
+p_red_biomass  <- make_panel(regression_data, "red_urchin_biomass",  "Red urchin biomass (m²)")
+p_green_density <- make_panel(regression_data, "green_urchin_density", "Green urchin density (m²)")
+p_stipe        <- make_panel(regression_data, "stipe_density",        "Macrocystis stipe density (m²)")
 
-p_stipe <- ggplot(regression_data, aes(x = stipe_density, y = mean_prob, color = TYPE)) +
-  geom_point(size = 3) +
-  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 0.8) +
-  scale_color_manual(values = c("Barren" = "red", "Macro_Forest" = "blue")) +
-  theme_classic() +
-  labs(x = "Macrocystis stipe density (m²)", y = "SVM probability (Barren)", color = "Habitat")
-
-# Combine into one figure
 (p_red_density + p_red_biomass) / (p_green_density + p_stipe) +
   plot_layout(guides = "collect") +
   plot_annotation(title = "SVM Probability vs Ecological Variables") &
   theme(legend.position = "bottom")
 ```
+
+```{r}
+table(cca_clean_data$TYPE)
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(kernlab)
+library(here)
+
+# Read in data
+cca_13_urchin_data <- read.csv("/Users/aminashenasa/soundscapes_data/data/acoustic_data/filtered_data/Sage_Constraints_Experiment_CCA Urchin Indices - 5 Second Clips (1).csv")
+
+# Clean TYPE and fix NDSI class
+cca_13_urchin_data$TYPE <- trimws(cca_urchin_data$TYPE)
+cca_13_urchin_data$NDSI <- as.numeric(cca_urchin_data$NDSI)
+
+URCHIN_LABEL    <- "URCHIN_CCA"
+NO_URCHIN_LABEL <- "NO URCHIN_CCA"
+predictors      <- c("ACI", "NDSI")
+type_col        <- "TYPE"
+
+# Prep data
+keep_rows             <- complete.cases(cca_13_urchin_data[, c(predictors, type_col)])
+cca_13_urchin_model_data <- cca_13_urchin_data[keep_rows, ]
+cca_13_urchin_model_data <- cca_13_urchin_model_data %>% filter(!is.na(TYPE))
+cca_13_urchin_model_data[[type_col]] <- factor(
+  cca_13_urchin_model_data[[type_col]],
+  levels = c(URCHIN_LABEL, NO_URCHIN_LABEL)
+)
+
+cat("Total rows used:", nrow(cca_13_urchin_model_data), "\n")
+cat("Class counts:\n")
+print(table(cca_13_urchin_model_data[[type_col]]))
+
+# Build clean dataframe
+cca_13_clean_data <- data.frame(
+  TYPE = ifelse(trimws(cca_13_urchin_data$TYPE) == "URCHIN_CCA", "URCHIN_CCA", "NO_URCHIN_CCA"),
+  ACI  = as.numeric(cca_13_urchin_data$ACI),
+  NDSI = as.numeric(cca_13_urchin_data$NDSI)
+)
+cca_13_clean_data <- na.omit(cca_13_clean_data)
+cca_13_clean_data$TYPE <- factor(
+  cca_13_clean_data$TYPE,
+  levels = c("URCHIN_CCA", "NO_URCHIN_CCA")
+)
+
+cat("Clean data class counts:\n")
+print(table(cca_13_clean_data$TYPE))
+nrow(cca_13_clean_data)
+
+# Train SVM
+cca_13_urchin_svm_model <- kernlab::ksvm(
+  TYPE ~ ACI + NDSI,
+  data       = cca_13_clean_data,
+  kernel     = "rbfdot",
+  kpar       = list(sigma = 0.25),
+  C          = 1,
+  prob.model = TRUE,
+  scaled     = TRUE
+)
+
+cat("\n--- Model Summary ---\n")
+cat("Kernel:                   Radial Basis Function\n")
+cat("Cost (C):                ", 1, "\n")
+cat("Gamma (sigma):           ", 0.25, "\n")
+cat("Number of Support Vectors:", cca_13_urchin_svm_model@nSV, "\n")
+
+# Training predictions & confusion matrix
+cca_13_train_pred <- predict(cca_13_urchin_svm_model, newdata = cca_13_clean_data)
+cca_13_conf_mat   <- table(Actual = cca_13_clean_data$TYPE, Predicted = cca_13_train_pred)
+cca_13_conf_rate  <- prop.table(cca_13_conf_mat, margin = 1)
+
+cat("\n--- Confusion Matrix (Counts) ---\n")
+print(cca_13_conf_mat)
+cat("\n--- Confusion Matrix (Predicted Rates) ---\n")
+print(round(cca_13_conf_rate, 3))
+
+cca_13_misclass_rate <- 1 - sum(diag(cca_13_conf_mat)) / sum(cca_13_conf_mat)
+cat("\nMisclassification Rate:", round(cca_13_misclass_rate, 7), "\n")
+
+# 5-fold cross validation
+set.seed(123)
+cca_13_urchin_svm_cv <- kernlab::ksvm(
+  TYPE ~ ACI + NDSI,
+  data       = cca_13_clean_data,
+  kernel     = "rbfdot",
+  kpar       = list(sigma = 0.25),
+  C          = 1,
+  cross      = 5,
+  scaled     = TRUE
+)
+cat("5-fold CV error:", cross(cca_13_urchin_svm_cv), "\n")
+cat("5-fold CV accuracy:", 1 - cross(cca_13_urchin_svm_cv), "\n")
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(kernlab)
+library(here)
+
+# Read in data
+cca_12_urchin_data <- read.csv("/Users/aminashenasa/soundscapes_data/data/acoustic_data/filtered_data/Sage_Constraints_Experiment_CCA Urchin Indices - 5 Second Clips (1).csv")
+
+# Clean TYPE and fix NDSI class
+cca_12_urchin_data$TYPE <- trimws(cca_12_urchin_data$TYPE)
+cca_12_urchin_data$NDSI <- as.numeric(cca_12_urchin_data$NDSI)
+
+URCHIN_LABEL    <- "URCHIN_CCA"
+NO_URCHIN_LABEL <- "NO URCHIN_CCA"
+predictors      <- c("ACI", "NDSI")
+type_col        <- "TYPE"
+
+# Prep data
+keep_rows                <- complete.cases(cca_12_urchin_data[, c(predictors, type_col)])
+cca_12_urchin_model_data <- cca_12_urchin_data[keep_rows, ]
+cca_12_urchin_model_data <- cca_12_urchin_model_data %>% filter(!is.na(TYPE))
+cca_12_urchin_model_data[[type_col]] <- factor(
+  cca_12_urchin_model_data[[type_col]],
+  levels = c(URCHIN_LABEL, NO_URCHIN_LABEL)
+)
+
+cat("Total rows used:", nrow(cca_12_urchin_model_data), "\n")
+cat("Class counts:\n")
+print(table(cca_12_urchin_model_data[[type_col]]))
+
+# Build clean dataframe - drop one from each group to get 12 vs 12
+cca_12_clean_data <- data.frame(
+  TYPE = ifelse(trimws(cca_12_urchin_data$TYPE) == "URCHIN_CCA", "URCHIN_CCA", "NO_URCHIN_CCA"),
+  ACI  = as.numeric(cca_12_urchin_data$ACI),
+  NDSI = as.numeric(cca_12_urchin_data$NDSI)
+)
+cca_12_clean_data <- na.omit(cca_12_clean_data)
+
+# Trim to 12 vs 12
+cca_12_clean_data <- cca_12_clean_data %>%
+  group_by(TYPE) %>%
+  slice_head(n = 12) %>%
+  ungroup()
+
+cca_12_clean_data$TYPE <- factor(
+  cca_12_clean_data$TYPE,
+  levels = c("URCHIN_CCA", "NO_URCHIN_CCA")
+)
+
+cat("Clean data class counts:\n")
+print(table(cca_12_clean_data$TYPE))
+nrow(cca_12_clean_data)
+
+# Train SVM
+cca_12_urchin_svm_model <- kernlab::ksvm(
+  TYPE ~ ACI + NDSI,
+  data       = cca_12_clean_data,
+  kernel     = "rbfdot",
+  kpar       = list(sigma = 0.25),
+  C          = 1,
+  prob.model = TRUE,
+  scaled     = TRUE
+)
+
+cat("\n--- Model Summary ---\n")
+cat("Kernel:                   Radial Basis Function\n")
+cat("Cost (C):                ", 1, "\n")
+cat("Gamma (sigma):           ", 0.25, "\n")
+cat("Number of Support Vectors:", cca_12_urchin_svm_model@nSV, "\n")
+
+# Training predictions & confusion matrix
+cca_12_train_pred <- predict(cca_12_urchin_svm_model, newdata = cca_12_clean_data)
+cca_12_conf_mat   <- table(Actual = cca_12_clean_data$TYPE, Predicted = cca_12_train_pred)
+cca_12_conf_rate  <- prop.table(cca_12_conf_mat, margin = 1)
+
+cat("\n--- Confusion Matrix (Counts) ---\n")
+print(cca_12_conf_mat)
+cat("\n--- Confusion Matrix (Predicted Rates) ---\n")
+print(round(cca_12_conf_rate, 3))
+
+cca_12_misclass_rate <- 1 - sum(diag(cca_12_conf_mat)) / sum(cca_12_conf_mat)
+cat("\nMisclassification Rate:", round(cca_12_misclass_rate, 7), "\n")
+
+# 5-fold cross validation
+set.seed(123)
+cca_12_urchin_svm_cv <- kernlab::ksvm(
+  TYPE ~ ACI + NDSI,
+  data       = cca_12_clean_data,
+  kernel     = "rbfdot",
+  kpar       = list(sigma = 0.25),
+  C          = 1,
+  cross      = 5,
+  scaled     = TRUE
+)
+cat("5-fold CV error:", cross(cca_12_urchin_svm_cv), "\n")
+cat("5-fold CV accuracy:", 1 - cross(cca_12_urchin_svm_cv), "\n")
+```
+
+```{r}
+# Get full dataset probabilities for both CCA versions
+cca_12_probs_full <- predict(cca_12_urchin_svm_model, 
+                              newdata = data.frame(ACI  = model_data$ACI, 
+                                                   NDSI = model_data$NDSI), 
+                              type = "probabilities")[, "URCHIN_CCA"]
+
+cca_13_probs_full <- predict(cca_13_urchin_svm_model, 
+                              newdata = data.frame(ACI  = model_data$ACI, 
+                                                   NDSI = model_data$NDSI), 
+                              type = "probabilities")[, "URCHIN_CCA"]
+
+# Build PCA and regression pipeline for each
+run_pipeline <- function(cca_probs, label) {
+  
+  # Combine three urchin model probabilities
+  urchin_prob_df <- data.frame(
+    cca_prob  = cca_probs,
+    rock_prob = rock_probs_full,
+    kelp_prob = kelp_probs_full
+  )
+  
+  # PCA
+  pca    <- prcomp(urchin_prob_df, scale. = TRUE)
+  cat(label, "— PCA variance explained:\n")
+  print(summary(pca)$importance)
+  
+  # Extract PC1 (flip sign so more urchin noise = positive)
+  pc1 <- -pca$x[, "PC1"]
+  
+  # Regress against habitat SVM probability
+  lm_fit <- lm(prob_barren_all ~ pc1)
+  r2     <- round(summary(lm_fit)$r.squared, 3)
+  adj_r2 <- round(summary(lm_fit)$adj.r.squared, 3)
+  p      <- summary(lm_fit)$coefficients[2, 4]
+  f      <- summary(lm_fit)$fstatistic
+  
+  cat(label, "— R²:", r2, "| Adj R²:", adj_r2, 
+      "| F:", round(f[1], 2), "| p:", format(p, scientific = TRUE), "\n\n")
+  
+  # Return for plotting
+  list(pc1 = pc1, lm_fit = lm_fit, label = label, r2 = r2, p = p)
+}
+
+results_12 <- run_pipeline(cca_12_probs_full, "CCA 12 vs 12")
+results_13 <- run_pipeline(cca_13_probs_full, "CCA 13 vs 13")
+```
+
+```{r}
+run_pipeline_noflip <- function(cca_probs, label) {
+  urchin_prob_df <- data.frame(
+    cca_prob  = cca_probs,
+    rock_prob = rock_probs_full,
+    kelp_prob = kelp_probs_full
+  )
+  pca    <- prcomp(urchin_prob_df, scale. = TRUE)
+  pc1    <- pca$x[, "PC1"]  # no flip
+  lm_fit <- lm(prob_barren_all ~ pc1)
+  r2     <- round(summary(lm_fit)$r.squared, 3)
+  cat(label, "— R²:", r2, "\n")
+}
+
+run_pipeline_noflip(cca_12_probs_full, "CCA 12 no flip")
+run_pipeline_noflip(cca_13_probs_full, "CCA 13 no flip")
+```
+
+```{r}
+nrow(pc1_df)
+```
+
+```{r}
+ggplot(pc1_df, aes(x = pc1, y = prob_barren)) +
+  geom_point(alpha = 0.3, size = 0.8, color = "steelblue") +
+  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 1) +
+  annotate("text",
+           x     = min(pc1_df$pc1),
+           y     = max(pc1_df$prob_barren),
+           label = paste0("R² = ", round(summary(lm_pc1)$r.squared, 3),
+                          ", P < 0.0001"),
+           hjust = 0, vjust = 1.5, size = 4.5) +
+  theme_classic() +
+  labs(
+    x = "More Urchin Noise (PC1)",
+    y = "Probability of Assignment as Urchin Barrens (SVM)"
+  ) +
+  theme(axis.title.x = element_text(size = 12, face = "bold"))
+```
+
+```{r}
+pc1_df$SITE <- model_data$SITE
+pc1_df$TYPE <- model_data$TYPE
+
+ggplot(pc1_df, aes(x = pc1, y = prob_barren)) +
+  geom_point(aes(color = SITE), alpha = 0.2, size = 0.8) +
+  geom_smooth(aes(color = SITE, group = SITE), method = "lm", se = FALSE, linewidth = 1) +
+  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 1, linetype = "dashed") +
+  annotate("text",
+           x     = min(pc1_df$pc1),
+           y     = max(pc1_df$prob_barren),
+           label = paste0("R² = ", round(summary(lm_pc1)$r.squared, 3),
+                          ", P < 0.0001"),
+           hjust = 0, vjust = 1.5, size = 4.5) +
+  scale_color_manual(values = c(
+    "Harris_Island"  = "red",
+    "Samsing_Cove"   = "orange",
+    "Sandy_Cove"     = "pink",
+    "Battery_Island" = "blue",
+    "Crow_Island"    = "purple",
+    "Middle_Island"  = "green"
+  )) +
+  theme_classic() +
+  labs(
+    x     = "More Urchin Noise (PC1)",
+    y     = "Probability of Assignment as Urchin Barrens (SVM)",
+    color = "Site"
+  ) +
+  theme(axis.title.x = element_text(size = 12, face = "bold"))
+```
+
+```{r}
+unique(model_data$SITE)
+```
+
+```{r}
+ggplot(pc1_df, aes(x = pc1, y = prob_barren)) +
+  geom_point(aes(color = SITE), alpha = 0.2, size = 0.8) +
+  geom_smooth(aes(color = SITE, group = SITE), method = "loess", se = FALSE, linewidth = 1) +
+  geom_smooth(method = "loess", color = "black", se = TRUE, linewidth = 1, linetype = "dashed") +
+  annotate("text",
+           x     = min(pc1_df$pc1),
+           y     = max(pc1_df$prob_barren),
+           label = paste0("R² = ", round(summary(lm_pc1)$r.squared, 3),
+                          ", P < 0.0001"),
+           hjust = 0, vjust = 1.5, size = 4.5) +
+  scale_color_manual(values = c(
+     "Harris_Island"  = "red",
+    "Samsing_Cove"   = "orange",
+    "Sandy_Cove"     = "pink",
+    "Battery_Island" = "blue",
+    "Crow_Island"    = "purple",
+    "Middle_Island"  = "green"
+  )) +
+  theme_classic() +
+  labs(
+    x     = "More Urchin Noise (PC1)",
+    y     = "Probability of Assignment as Urchin Barrens (SVM)",
+    color = "Site"
+  ) +
+  theme(axis.title.x = element_text(size = 12, face = "bold"))
+```
+
+## DFA Approach Alternative
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(MASS)
+
+BARREN_LABEL <- "Barren"
+FOREST_LABEL <- "Macro_Forest"
+predictors   <- c("ACI", "NDSI", "AEI", "ADI")
+type_col     <- "TYPE"
+
+# Prep data
+keep_rows          <- complete.cases(all_data[, c(predictors, type_col)])
+habitat_model_data <- all_data[keep_rows, ]
+habitat_model_data[[type_col]] <- factor(
+  habitat_model_data[[type_col]],
+  levels = c(BARREN_LABEL, FOREST_LABEL)
+)
+
+cat("Total rows used:", nrow(habitat_model_data), "\n")
+cat("Class counts:\n")
+print(table(habitat_model_data[[type_col]]))
+
+# Train LDA
+habitat_lda_model <- lda(
+  TYPE ~ ACI + NDSI + AEI + ADI,
+  data = habitat_model_data
+)
+
+cat("\n--- LDA Model Summary ---\n")
+print(habitat_lda_model)
+
+# Training predictions & confusion matrix
+habitat_lda_pred <- predict(habitat_lda_model, newdata = habitat_model_data)
+
+stopifnot(length(habitat_lda_pred$class) == nrow(habitat_model_data))
+
+conf_mat  <- table(Actual = habitat_model_data[[type_col]], Predicted = habitat_lda_pred$class)
+conf_rate <- prop.table(conf_mat, margin = 1)
+
+cat("\n--- Confusion Matrix (Counts) ---\n")
+print(conf_mat)
+cat("\n--- Confusion Matrix (Predicted Rates) ---\n")
+print(round(conf_rate, 3))
+
+misclass_rate <- 1 - sum(diag(conf_mat)) / sum(conf_mat)
+cat("\nMisclassification Rate:", round(misclass_rate, 7), "\n")
+cat("(JMP SVM reference:      0.2158539)\n")
+
+# Leave-one-out cross validation
+habitat_lda_cv <- lda(
+  TYPE ~ ACI + NDSI + AEI + ADI,
+  data = habitat_model_data,
+  CV   = TRUE
+)
+
+cv_conf_mat  <- table(Actual = habitat_model_data[[type_col]], Predicted = habitat_lda_cv$class)
+cv_conf_rate <- prop.table(cv_conf_mat, margin = 1)
+cv_misclass  <- 1 - sum(diag(cv_conf_mat)) / sum(cv_conf_mat)
+
+cat("\n--- LOO-CV Confusion Matrix (Counts) ---\n")
+print(cv_conf_mat)
+cat("\n--- LOO-CV Confusion Matrix (Rates) ---\n")
+print(round(cv_conf_rate, 3))
+cat("LOO-CV Misclassification Rate:", round(cv_misclass, 7), "\n")
+
+# Extract posterior probabilities for downstream use
+prob_barren_lda <- habitat_lda_pred$posterior[, "Barren"]
+```
+
+```{r}
+library(MASS)
+
+# CCA
+cca_lda_model <- lda(TYPE ~ ACI + NDSI, data = cca_clean_data)
+cca_lda_pred  <- predict(cca_lda_model, newdata = cca_clean_data)
+
+conf_mat <- table(Actual = cca_clean_data$TYPE, Predicted = cca_lda_pred$class)
+print(conf_mat)
+cat("Misclassification Rate:", 1 - sum(diag(conf_mat)) / sum(conf_mat), "\n")
+
+# Bare Rock
+rock_lda_model <- lda(TYPE ~ ACI + NDSI, data = rock_clean_data)
+rock_lda_pred  <- predict(rock_lda_model, newdata = rock_clean_data)
+
+conf_mat <- table(Actual = rock_clean_data$TYPE, Predicted = rock_lda_pred$class)
+print(conf_mat)
+cat("Misclassification Rate:", 1 - sum(diag(conf_mat)) / sum(conf_mat), "\n")
+
+# Kelp
+kelp_lda_model <- lda(TYPE ~ ACI + NDSI, data = kelp_clean_data)
+kelp_lda_pred  <- predict(kelp_lda_model, newdata = kelp_clean_data)
+
+conf_mat <- table(Actual = kelp_clean_data$TYPE, Predicted = kelp_lda_pred$class)
+print(conf_mat)
+cat("Misclassification Rate:", 1 - sum(diag(conf_mat)) / sum(conf_mat), "\n")
+```
+
+```{r}
+library(MASS)
+
+# Train urchin LDA models
+
+# CCA
+cca_lda_model <- lda(TYPE ~ ACI + NDSI, data = cca_clean_data)
+
+cca_lda_train_pred <- predict(cca_lda_model, newdata = cca_clean_data)
+cca_lda_conf_mat   <- table(Actual = cca_clean_data$TYPE, Predicted = cca_lda_train_pred$class)
+cca_lda_conf_rate  <- prop.table(cca_lda_conf_mat, margin = 1)
+cat("--- CCA LDA ---\n")
+print(cca_lda_conf_mat)
+print(round(cca_lda_conf_rate, 3))
+cat("Misclassification Rate:", 1 - sum(diag(cca_lda_conf_mat)) / sum(cca_lda_conf_mat), "\n\n")
+
+# LOO-CV
+cca_lda_cv <- lda(TYPE ~ ACI + NDSI, data = cca_clean_data, CV = TRUE)
+cca_cv_conf <- table(Actual = cca_clean_data$TYPE, Predicted = cca_lda_cv$class)
+cat("CCA LOO-CV Misclassification Rate:", 1 - sum(diag(cca_cv_conf)) / sum(cca_cv_conf), "\n\n")
+
+# Bare Rock
+rock_lda_model <- lda(TYPE ~ ACI + NDSI, data = rock_clean_data)
+
+rock_lda_train_pred <- predict(rock_lda_model, newdata = rock_clean_data)
+rock_lda_conf_mat   <- table(Actual = rock_clean_data$TYPE, Predicted = rock_lda_train_pred$class)
+rock_lda_conf_rate  <- prop.table(rock_lda_conf_mat, margin = 1)
+cat("--- Bare Rock LDA ---\n")
+print(rock_lda_conf_mat)
+print(round(rock_lda_conf_rate, 3))
+cat("Misclassification Rate:", 1 - sum(diag(rock_lda_conf_mat)) / sum(rock_lda_conf_mat), "\n\n")
+
+# LOO-CV
+rock_lda_cv <- lda(TYPE ~ ACI + NDSI, data = rock_clean_data, CV = TRUE)
+rock_cv_conf <- table(Actual = rock_clean_data$TYPE, Predicted = rock_lda_cv$class)
+cat("Rock LOO-CV Misclassification Rate:", 1 - sum(diag(rock_cv_conf)) / sum(rock_cv_conf), "\n\n")
+
+# Kelp
+kelp_lda_model <- lda(TYPE ~ ACI + NDSI, data = kelp_clean_data)
+
+kelp_lda_train_pred <- predict(kelp_lda_model, newdata = kelp_clean_data)
+kelp_lda_conf_mat   <- table(Actual = kelp_clean_data$TYPE, Predicted = kelp_lda_train_pred$class)
+kelp_lda_conf_rate  <- prop.table(kelp_lda_conf_mat, margin = 1)
+cat("--- Kelp LDA ---\n")
+print(kelp_lda_conf_mat)
+print(round(kelp_lda_conf_rate, 3))
+cat("Misclassification Rate:", 1 - sum(diag(kelp_lda_conf_mat)) / sum(kelp_lda_conf_mat), "\n\n")
+
+# LOO-CV
+kelp_lda_cv <- lda(TYPE ~ ACI + NDSI, data = kelp_clean_data, CV = TRUE)
+kelp_cv_conf <- table(Actual = kelp_clean_data$TYPE, Predicted = kelp_lda_cv$class)
+cat("Kelp LOO-CV Misclassification Rate:", 1 - sum(diag(kelp_cv_conf)) / sum(kelp_cv_conf), "\n\n")
+
+# Predict all three onto full habitat_model_data
+cca_probs_lda_full  <- predict(cca_lda_model,
+                                newdata = data.frame(ACI  = habitat_model_data$ACI,
+                                                     NDSI = habitat_model_data$NDSI))$posterior[, "URCHIN_CCA"]
+
+rock_probs_lda_full <- predict(rock_lda_model,
+                                newdata = data.frame(ACI  = as.numeric(habitat_model_data$ACI),
+                                                     NDSI = as.numeric(habitat_model_data$NDSI)))$posterior[, "URCHINS_BARE_ROCK"]
+
+kelp_probs_lda_full <- predict(kelp_lda_model,
+                                newdata = data.frame(ACI  = habitat_model_data$ACI,
+                                                     NDSI = habitat_model_data$NDSI))$posterior[, "URCHIN_KELP"]
+
+# PCA on three urchin LDA probabilities
+urchin_prob_lda_df <- data.frame(
+  cca_prob  = cca_probs_lda_full,
+  rock_prob = rock_probs_lda_full,
+  kelp_prob = kelp_probs_lda_full
+)
+
+urchin_lda_pca <- prcomp(urchin_prob_lda_df, scale. = TRUE)
+cat("PCA variance explained:\n")
+print(summary(urchin_lda_pca)$importance)
+
+# Extract PC1
+pc1_lda <- urchin_lda_pca$x[, "PC1"]
+
+# Regression against habitat LDA probability
+lm_pc1_lda <- lm(prob_barren_lda ~ pc1_lda)
+cat("\n--- PC1 vs Habitat LDA Probability Regression ---\n")
+print(summary(lm_pc1_lda))
+
+# Build plot dataframe
+pc1_lda_df <- data.frame(
+  pc1         = pc1_lda,
+  prob_barren = prob_barren_lda,
+  SITE        = habitat_model_data$SITE,
+  TYPE        = habitat_model_data$TYPE
+)
+
+# Plot
+ggplot(pc1_lda_df, aes(x = pc1, y = prob_barren)) +
+  geom_point(aes(color = SITE), alpha = 0.2, size = 0.8) +
+  geom_smooth(aes(color = SITE, group = SITE), method = "lm", se = FALSE, linewidth = 1) +
+  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 1, linetype = "dashed") +
+  annotate("text",
+           x     = min(pc1_lda_df$pc1),
+           y     = max(pc1_lda_df$prob_barren),
+           label = paste0("R² = ", round(summary(lm_pc1_lda)$r.squared, 3),
+                          ", P < 0.0001"),
+           hjust = 0, vjust = 1.5, size = 4.5) +
+ scale_color_manual(values = c(
+    "Harris_Island"  = "red",
+    "Samsing_Cove"   = "orange",
+    "Sandy_Cove"     = "pink",
+    "Battery_Island" = "blue",
+    "Crow_Island"    = "purple",
+    "Middle_Island"  = "green"
+  )) +
+  theme_classic() +
+  labs(
+    x     = "More Urchin Noise (PC1)",
+    y     = "Probability of Assignment as Urchin Barrens (LDA)",
+    color = "Site"
+  ) +
+  theme(axis.title.x = element_text(size = 12, face = "bold"))
+```
+
+## PC1 with different curves
+
+```{r}
+library(patchwork)
+
+# Linear
+p_linear <- ggplot(pc1_df, aes(x = pc1, y = prob_barren)) +
+  geom_point(alpha = 0.3, size = 0.8, color = "steelblue") +
+  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 1) +
+  annotate("text", x = min(pc1_df$pc1), y = max(pc1_df$prob_barren),
+           label = paste0("Linear | R² = ", round(summary(lm_pc1)$r.squared, 3)),
+           hjust = 0, vjust = 1.5, size = 3.5) +
+  theme_classic() +
+  labs(title = "Linear", x = "More Urchin Noise (PC1)", y = "P(Barren)")
+
+# Loess
+p_loess <- ggplot(pc1_df, aes(x = pc1, y = prob_barren)) +
+  geom_point(alpha = 0.3, size = 0.8, color = "steelblue") +
+  geom_smooth(method = "loess", color = "black", se = TRUE, linewidth = 1) +
+  theme_classic() +
+  labs(title = "LOESS", x = "More Urchin Noise (PC1)", y = "P(Barren)")
+
+# Quadratic
+lm_quad <- lm(prob_barren ~ poly(pc1, 2), data = pc1_df)
+p_quad <- ggplot(pc1_df, aes(x = pc1, y = prob_barren)) +
+  geom_point(alpha = 0.3, size = 0.8, color = "steelblue") +
+  geom_smooth(method = "lm", formula = y ~ poly(x, 2), color = "black", se = TRUE, linewidth = 1) +
+  annotate("text", x = min(pc1_df$pc1), y = max(pc1_df$prob_barren),
+           label = paste0("Quadratic | R² = ", round(summary(lm_quad)$r.squared, 3)),
+           hjust = 0, vjust = 1.5, size = 3.5) +
+  theme_classic() +
+  labs(title = "Quadratic", x = "More Urchin Noise (PC1)", y = "P(Barren)")
+
+# Cubic
+lm_cubic <- lm(prob_barren ~ poly(pc1, 3), data = pc1_df)
+p_cubic <- ggplot(pc1_df, aes(x = pc1, y = prob_barren)) +
+  geom_point(alpha = 0.3, size = 0.8, color = "steelblue") +
+  geom_smooth(method = "lm", formula = y ~ poly(x, 3), color = "black", se = TRUE, linewidth = 1) +
+  annotate("text", x = min(pc1_df$pc1), y = max(pc1_df$prob_barren),
+           label = paste0("Cubic | R² = ", round(summary(lm_cubic)$r.squared, 3)),
+           hjust = 0, vjust = 1.5, size = 3.5) +
+  theme_classic() +
+  labs(title = "Cubic", x = "More Urchin Noise (PC1)", y = "P(Barren)")
+
+# Exponential
+lm_exp <- lm(log(prob_barren + 0.001) ~ pc1, data = pc1_df)
+p_exp <- ggplot(pc1_df, aes(x = pc1, y = prob_barren)) +
+  geom_point(alpha = 0.3, size = 0.8, color = "steelblue") +
+  geom_smooth(method = "glm", method.args = list(family = gaussian(link = "log")),
+              color = "black", se = TRUE, linewidth = 1) +
+  annotate("text", x = min(pc1_df$pc1), y = max(pc1_df$prob_barren),
+           label = paste0("Exponential | R² = ", round(summary(lm_exp)$r.squared, 3)),
+           hjust = 0, vjust = 1.5, size = 3.5) +
+  theme_classic() +
+  labs(title = "Exponential", x = "More Urchin Noise (PC1)", y = "P(Barren)")
+
+# Logistic
+lm_logistic <- glm(prob_barren ~ pc1, data = pc1_df, family = quasibinomial())
+p_logistic <- ggplot(pc1_df, aes(x = pc1, y = prob_barren)) +
+  geom_point(alpha = 0.3, size = 0.8, color = "steelblue") +
+  geom_smooth(method = "glm", method.args = list(family = quasibinomial()),
+              color = "black", se = TRUE, linewidth = 1) +
+  theme_classic() +
+  labs(title = "Logistic", x = "More Urchin Noise (PC1)", y = "P(Barren)")
+
+# Combine
+(p_linear + p_loess) / (p_quad + p_cubic) / (p_exp + p_logistic)
+```
+
+```{r}
+library(ggplot2)
+
+# Fit biexponential using nls
+# Need good starting values or it won't converge
+biexp_fit <- nls(
+  prob_barren ~ a * exp(b * pc1) + c * exp(d * pc1),
+  data  = pc1_df,
+  start = list(a = 0.5, b = 0.1, c = 0.5, d = -0.1),
+  control = nls.control(maxiter = 200)
+)
+
+summary(biexp_fit)
+
+# R² for nls (not automatic, calculate manually)
+ss_res <- sum(residuals(biexp_fit)^2)
+ss_tot <- sum((pc1_df$prob_barren - mean(pc1_df$prob_barren))^2)
+r2_biexp <- 1 - ss_res / ss_tot
+cat("Biexponential R²:", round(r2_biexp, 3), "\n")
+
+# Plot
+pc1_range <- seq(min(pc1_df$pc1), max(pc1_df$pc1), length.out = 500)
+biexp_pred <- predict(biexp_fit, newdata = data.frame(pc1 = pc1_range))
+biexp_line <- data.frame(pc1 = pc1_range, prob_barren = biexp_pred)
+
+ggplot(pc1_df, aes(x = pc1, y = prob_barren)) +
+  geom_point(alpha = 0.3, size = 0.8, color = "steelblue") +
+  geom_line(data = biexp_line, aes(x = pc1, y = prob_barren),
+            color = "black", linewidth = 1) +
+  annotate("text",
+           x     = min(pc1_df$pc1),
+           y     = max(pc1_df$prob_barren),
+           label = paste0("Biexponential | R² = ", round(r2_biexp, 3)),
+           hjust = 0, vjust = 1.5, size = 4) +
+  theme_classic() +
+  labs(
+    title = "Biexponential Fit",
+    x     = "More Urchin Noise (PC1)",
+    y     = "Probability of Assignment as Urchin Barrens (SVM)"
+  )
+```
+
+```{r}
+# Simple exponential
+exp_fit <- nls(
+  prob_barren ~ a * exp(b * pc1),
+  data    = pc1_df,
+  start   = list(a = 0.3, b = 0.1),
+  control = nls.control(maxiter = 500, minFactor = 1e-10)
+)
+
+ss_res  <- sum(residuals(exp_fit)^2)
+ss_tot  <- sum((pc1_df$prob_barren - mean(pc1_df$prob_barren))^2)
+r2_exp  <- 1 - ss_res / ss_tot
+cat("Simple exponential R²:", round(r2_exp, 3), "\n")
+
+pc1_range <- seq(min(pc1_df$pc1), max(pc1_df$pc1), length.out = 500)
+exp_pred  <- predict(exp_fit, newdata = data.frame(pc1 = pc1_range))
+exp_line  <- data.frame(pc1 = pc1_range, prob_barren = exp_pred)
+
+ggplot(pc1_df, aes(x = pc1, y = prob_barren)) +
+  geom_point(alpha = 0.2, size = 0.8, color = "steelblue") +
+  geom_line(data = exp_line, aes(x = pc1, y = prob_barren),
+            color = "black", linewidth = 1) +
+  annotate("text",
+           x     = min(pc1_df$pc1),
+           y     = max(pc1_df$prob_barren),
+           label = paste0("Exponential | R² = ", round(r2_exp, 3)),
+           hjust = 0, vjust = 1.5, size = 4) +
+  coord_cartesian(ylim = c(0, 1)) +
+  theme_classic() +
+  labs(
+    x = "More Urchin Noise (PC1)",
+    y = "Probability of Assignment as Urchin Barrens (SVM)"
+  )
+```
+
+```{r}
+# Extract hour from TIME..UTC. column
+model_data$HOUR_UTC <- hour(hms(model_data$TIME..UTC.))
+
+# Add to pc1_df
+pc1_df$HOUR_UTC <- model_data$HOUR_UTC
+
+# Check it worked
+table(pc1_df$HOUR_UTC)
+```
+
+```{r}
+# Fit exponential with hour as additional predictor
+exp_hour_fit <- nls(
+  prob_barren ~ a * exp(b * pc1 + c * HOUR_UTC),
+  data    = pc1_df,
+  start   = list(a = 0.3, b = 0.1, c = 0.01),
+  control = nls.control(maxiter = 500, minFactor = 1e-10)
+)
+
+summary(exp_hour_fit)
+
+ss_res      <- sum(residuals(exp_hour_fit)^2)
+ss_tot      <- sum((pc1_df$prob_barren - mean(pc1_df$prob_barren))^2)
+r2_exp_hour <- 1 - ss_res / ss_tot
+cat("Exponential with hour R²:", round(r2_exp_hour, 3), "\n")
+
+# Create prediction grid over PC1 and hour ranges
+pc1_range  <- seq(min(pc1_df$pc1), max(pc1_df$pc1), length.out = 200)
+hour_range <- seq(0, 23, by = 1)
+pred_grid  <- expand.grid(pc1 = pc1_range, HOUR_UTC = hour_range)
+pred_grid$prob_barren <- predict(exp_hour_fit, newdata = pred_grid)
+
+# Plot with hour colored points and fitted lines per hour
+ggplot(pc1_df, aes(x = pc1, y = prob_barren, color = HOUR_UTC)) +
+  geom_point(alpha = 0.2, size = 0.8) +
+  geom_line(data = pred_grid %>% filter(HOUR_UTC %in% c(0:23)),
+            aes(x = pc1, y = prob_barren, group = HOUR_UTC),
+            linewidth = 1, inherit.aes = FALSE,
+            color = c("navy", "cyan", "gold", "red")[
+              match(pred_grid %>% filter(HOUR_UTC %in% c(0:23)) %>% pull(HOUR_UTC),
+                    c(0:23))]) +
+  scale_color_gradientn(
+    colors = c("navy", "steelblue", "cyan", "gold", "orange", "red", "purple", "navy"),
+    values = scales::rescale(c(0:23)),
+    name   = "Hour of Day (UTC)"
+  ) +
+  annotate("text",
+           x     = min(pc1_df$pc1),
+           y     = max(pc1_df$prob_barren),
+           label = paste0("Exp + Hour | R² = ", round(r2_exp_hour, 3)),
+           hjust = 0, vjust = 1.5, size = 4) +
+  coord_cartesian(ylim = c(0, 1)) +
+  theme_classic() +
+  labs(
+    x = "More Urchin Noise (PC1)",
+    y = "Probability of Assignment as Urchin Barrens (SVM)"
+  )
+```
+
+## PC1 and Ecological Variables
