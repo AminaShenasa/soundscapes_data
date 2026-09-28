@@ -419,6 +419,10 @@ names(combined_df_pca)          # should include tide_temp_pc1
 ```
 
 ```{r}
+write.csv(combined_df_pca, "combined_df_pca.csv", row.names = FALSE)
+```
+
+```{r}
 library(car)
 m_lme_pca_extended <- lme(value ~ tide_temp_pc1 * elevation * TYPE,
                   random = ~ 1 | site,
@@ -428,6 +432,24 @@ m_lme_pca_extended <- lme(value ~ tide_temp_pc1 * elevation * TYPE,
 summary(m_lme_pca_extended)
 VarCorr(m_lme_pca_extended)
 Anova(m_lme_pca_extended, type = "III")
+```
+
+```{r}
+library(mmrm)
+
+combined_df_mm <- combined_df_pca %>%
+  arrange(site, hour_continuous) %>%
+  mutate(hour_factor = factor(hour_continuous))   # 120 levels, 0 to 119
+
+stopifnot(nrow(combined_df_mm) == 720, nlevels(combined_df_mm$hour_factor) == 120)
+
+m_mmrm <- mmrm(
+  formula = value ~ tide_temp_pc1 * elevation * TYPE + ar1(hour_factor | site),
+  data    = combined_df_mm,
+  control = mmrm_control(method = "Kenward-Roger", n_cores = 1)
+)
+
+summary(m_mmrm)
 ```
 
 ```{r}
