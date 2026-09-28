@@ -13,7 +13,7 @@ editor: visual
 ```{r}
 #reading in the data
 library(here)
-harris_island <- read.csv("data/barren_sites/harris_island_hydromoth12.csv")
+harris_island <- read.csv("/users/aminashenasa/soundscapes_data/data/acoustic_data/raw_data/barren_sites/harris_island_hydromoth12.csv")
 ```
 
 ### Filtering to sync time duration across forest and barren sites
@@ -62,7 +62,7 @@ samsing_cove \<- read.csv("data/barren_sites/samsing_cove_hydromoth6.csv")
 ```{r}
 #Reading in the data
 library(here)
-samsing_cove <- read.csv("data/barren_sites/samsing_cove_hydromoth6.csv")
+samsing_cove <- read.csv("/users/aminashenasa/soundscapes_data/data/acoustic_data/raw_data/barren_sites/samsing_cove_hydromoth6.csv")
 ```
 
 ### Filtering to sync time duration across forest and barren sites
@@ -104,7 +104,7 @@ nrow(filtered_samsing_cove)
 ```{r}
 #reading in the data
 library(here)
-sandy_cove <- read.csv("data/barren_sites/sandy_cove_hydromoth15.csv")
+sandy_cove <- read.csv("/users/aminashenasa/soundscapes_data/data/acoustic_data/raw_data/barren_sites/sandy_cove_hydromoth15.csv")
 ```
 
 ### Filtering to sync time duration across forest and barren sites
@@ -147,7 +147,7 @@ nrow(filtered_sandy_cove)
 ```{r}
 #Reading in the data
 library(here)
-battery_island <- read.csv("data/macro_forest_sites/battery_island_hydromoth0.csv")
+battery_island <- read.csv("/users/aminashenasa/soundscapes_data/data/acoustic_data/raw_data/macro_forest_sites/battery_island_hydromoth0.csv")
 ```
 
 ### Filtering to sync time duration across forest and barren sites
@@ -188,7 +188,7 @@ nrow(filtered_battery_island)
 ```{r}
 #Reading in the data
 library(here)
-crow_island <- read.csv("data/macro_forest_sites/crow_island_hydromoth0.5.csv")
+crow_island <- read.csv("/users/aminashenasa/soundscapes_data/data/acoustic_data/raw_data/macro_forest_sites/crow_island_hydromoth0.5.csv")
 ```
 
 ### Filtering to sync time duration across forest and barren sites
@@ -229,7 +229,7 @@ nrow(filtered_crow_island)
 ```{r}
 #Reading in the data
 library(here)
-middle_island <- read.csv("data/macro_forest_sites/middle_island_hydromoth2.csv")
+middle_island <- read.csv("/users/aminashenasa/soundscapes_data/data/acoustic_data/raw_data/macro_forest_sites/middle_island_hydromoth2.csv")
 ```
 
 ### Filtering to sync time duration across forest and barren sites
@@ -284,6 +284,256 @@ all_data <- rbind(
 all_data$TYPE <- factor(all_data$TYPE, levels = c("Barren", "Macro_Forest"))
 all_data$site <- factor(all_data$site)
 
+table(all_data$SITE)
 ```
 
-## 
+```{r}
+dir.create(here("data", "derived"), recursive = TRUE, showWarnings = FALSE)
+saveRDS(all_data, here("data", "derived", "all_data.rds"))
+```
+
+```{r}
+file.exists(here("data", "derived", "all_data.rds"))
+file.size(here("data", "derived", "all_data.rds")) / 1e6   # MB
+```
+
+```{r}
+saveRDS(all_data, here("data", "derived", "all_data.rds"))
+```
+
+# 1 sec indices
+
+```{r}
+harris_island_1sec <- read.csv("~/soundscapes_data/data/acoustic_data/1-sec-indices/harris_island_hydromoth_12.csv")
+```
+
+```{r}
+filtered_harris_island_1sec <- harris_island_1sec %>% 
+  # 1. Remove leading/trailing whitespace
+  mutate(
+    DATE = trimws(DATE),
+    TIME = trimws(TIME)
+  ) %>% 
+  # 2. Combine and convert datetime, add new Site and Type columns
+  mutate(
+    full_datetime = ymd_hms(
+      paste(DATE, TIME), 
+      tz = "UTC", 
+      truncated = 3, 
+      quiet = TRUE
+    ),
+    Site = "Harris Island",   
+    Type = "Urchin Barren"       
+  ) %>% 
+  # 3. Filter out NAs and apply date range
+  filter(!is.na(full_datetime)) %>% 
+  filter(between(full_datetime, start_datetime, end_datetime)) %>%
+  # 4. Sort rows from earliest to latest
+  arrange(full_datetime) %>%
+  relocate(Site, Type, .before = everything())
+
+# Check the final count and see your new columns
+nrow(filtered_harris_island_1sec)
+
+
+head(filtered_harris_island_1sec)
+```
+
+```{r}
+samsing_cove_1sec <- read.csv("~/soundscapes_data/data/acoustic_data/1-sec-indices/samsing_cove_hydromoth_6.csv")
+```
+
+```{r}
+filtered_samsing_cove_1sec <- samsing_cove_1sec %>% 
+  # 1. Remove leading/trailing whitespace
+  mutate(
+    DATE = trimws(DATE),
+    TIME = trimws(TIME)
+  ) %>% 
+  # 2. Combine and convert datetime, add new Site and Type columns
+  mutate(
+    full_datetime = ymd_hms(
+      paste(DATE, TIME), 
+      tz = "UTC", 
+      truncated = 3, 
+      quiet = TRUE
+    ),
+    Site = "Samsing Cove",   
+    Type = "Urchin Barren"       
+  ) %>% 
+  # 3. Filter out NAs and apply date range
+  filter(!is.na(full_datetime)) %>% 
+  filter(between(full_datetime, start_datetime, end_datetime)) %>%
+  # 4. Sort rows from earliest to latest
+  arrange(full_datetime) %>%
+  relocate(Site, Type, .before = everything())
+
+# Check the final count and see your new columns
+nrow(filtered_samsing_cove_1sec)
+head(filtered_samsing_cove_1sec)
+
+
+```
+
+```{r}
+sandy_cove_1sec <- read.csv("~/soundscapes_data/data/acoustic_data/1-sec-indices/sandy_cove_hydromoth_15.csv")
+```
+
+```{r}
+filtered_sandy_cove_1sec <- sandy_cove_1sec %>% 
+  # 1. Remove leading/trailing whitespace
+  mutate(
+    DATE = trimws(DATE),
+    TIME = trimws(TIME)
+  ) %>% 
+  # 2. Combine and convert datetime, add new Site and Type columns
+  mutate(
+    full_datetime = ymd_hms(
+      paste(DATE, TIME), 
+      tz = "UTC", 
+      truncated = 3, 
+      quiet = TRUE
+    ),
+    Site = "Sandy Cove",   
+    Type = "Urchin Barren"       
+  ) %>% 
+  # 3. Filter out NAs and apply date range
+  filter(!is.na(full_datetime)) %>% 
+  filter(between(full_datetime, start_datetime, end_datetime)) %>%
+  # 4. Sort rows from earliest to latest
+  arrange(full_datetime) %>%
+  relocate(Site, Type, .before = everything())
+
+# Check the final count and see your new columns
+nrow(filtered_sandy_cove_1sec)
+head(filtered_sandy_cove_1sec)
+
+
+```
+
+```{r}
+battery_island_1sec <- read.csv("~/soundscapes_data/data/acoustic_data/1-sec-indices/battery_island_hydromoth_0.csv")
+```
+
+```{r}
+filtered_battery_island_1sec <- battery_island_1sec %>% 
+  # 1. Remove leading/trailing whitespace
+  mutate(
+    DATE = trimws(DATE),
+    TIME = trimws(TIME)
+  ) %>% 
+  # 2. Combine and convert datetime, add new Site and Type columns
+  mutate(
+    full_datetime = ymd_hms(
+      paste(DATE, TIME), 
+      tz = "UTC", 
+      truncated = 3, 
+      quiet = TRUE
+    ),
+    Site = "Battery Island",   
+    Type = "Macrocystis Forest"       
+  ) %>% 
+  # 3. Filter out NAs and apply date range
+  filter(!is.na(full_datetime)) %>% 
+  filter(between(full_datetime, start_datetime, end_datetime)) %>%
+  # 4. Sort rows from earliest to latest
+  arrange(full_datetime) %>%
+  relocate(Site, Type, .before = everything())
+
+# Check the final count and see your new columns
+nrow(filtered_battery_island_1sec)
+head(filtered_battery_island_1sec)
+
+
+```
+
+```{r}
+crow_island_1sec <- read.csv("~/soundscapes_data/data/acoustic_data/1-sec-indices/crow_island_hydromoth_0.5.csv")
+```
+
+```{r}
+filtered_crow_island_1sec <- crow_island_1sec %>% 
+  # 1. Remove leading/trailing whitespace
+  mutate(
+    DATE = trimws(DATE),
+    TIME = trimws(TIME)
+  ) %>% 
+  # 2. Combine and convert datetime, add new Site and Type columns
+  mutate(
+    full_datetime = ymd_hms(
+      paste(DATE, TIME), 
+      tz = "UTC", 
+      truncated = 3, 
+      quiet = TRUE
+    ),
+    Site = "Crow Island",   
+    Type = "Macrocystis Forest"       
+  ) %>% 
+  # 3. Filter out NAs and apply date range
+  filter(!is.na(full_datetime)) %>% 
+  filter(between(full_datetime, start_datetime, end_datetime)) %>%
+  # 4. Sort rows from earliest to latest
+  arrange(full_datetime) %>%
+  relocate(Site, Type, .before = everything())
+
+# Check the final count and see your new columns
+nrow(filtered_crow_island_1sec)
+head(filtered_crow_island_1sec)
+
+```
+
+```{r}
+middle_island_1sec <- read.csv("~/soundscapes_data/data/acoustic_data/1-sec-indices/middle_island_hydromoth_2.csv")
+```
+
+```{r}
+filtered_middle_island_1sec <- middle_island_1sec %>% 
+  # 1. Remove leading/trailing whitespace
+  mutate(
+    DATE = trimws(DATE),
+    TIME = trimws(TIME)
+  ) %>% 
+  # 2. Combine and convert datetime, add new Site and Type columns
+  mutate(
+    full_datetime = ymd_hms(
+      paste(DATE, TIME), 
+      tz = "UTC", 
+      truncated = 3, 
+      quiet = TRUE
+    ),
+    Site = "Middle Island",   
+    Type = "Macrocystis Forest"       
+  ) %>% 
+  # 3. Filter out NAs and apply date range
+  filter(!is.na(full_datetime)) %>% 
+  filter(between(full_datetime, start_datetime, end_datetime)) %>%
+  # 4. Sort rows from earliest to latest
+  arrange(full_datetime) %>%
+  relocate(Site, Type, .before = everything())
+
+# Check the final count and see your new columns
+nrow(filtered_middle_island_1sec)
+head(filtered_middle_island_1sec)
+
+```
+
+```{r}
+# 1. Combine dataframes and create columns 
+all_data_1sec <- rbind(
+  transform(filtered_samsing_cove_1sec,  site = "samsing_cove",  type = "Urchin Barren"),
+  transform(filtered_sandy_cove_1sec,    site = "sandy_cove",    type = "Urchin Barren"),
+  transform(filtered_harris_island_1sec, site = "harris_island",  type = "Urchin Barren"),
+  transform(filtered_crow_island_1sec,   site = "crow_island",   type = "Macrocystis Forest"),
+  transform(filtered_middle_island_1sec, site = "middle_island", type = "Macrocystis Forest"),
+  transform(filtered_battery_island_1sec,site = "battery_island",type = "Macrocystis Forest")
+)
+
+# 2. Convert columns to factors 
+all_data_1sec$type <- factor(all_data_1sec$type, levels = c("Urchin Barren", "Macrocystis Forest"))
+all_data_1sec$site <- factor(all_data_1sec$site)
+
+# 3. Check the counts 
+table(all_data_1sec$site)
+table(all_data_1sec$type)
+
+```

@@ -1,0 +1,59 @@
+---
+title: "hard-drive-check"
+format: html
+editor: visual
+---
+
+## 
+
+```{r}
+# Define file paths
+original <- "/Users/aminashenasa/Downloads/Acoustic_Indices - Copy of Sandy Cove_HydroMoth 15.csv"
+test <- "/Users/aminashenasa/Downloads/Acoustic_Indices - Test_Sandy_Cove_HydroMoth_15.csv"
+
+# Compare MD5 checksums
+is_identical <- tools::md5sum(original) == tools::md5sum(test)
+
+# Print result (TRUE or FALSE)
+print(is_identical)
+
+```
+
+```{r}
+# 1. Load the two CSV files
+df1 <- read.csv("/Users/aminashenasa/Downloads/Acoustic_Indices - Copy of Sandy Cove_HydroMoth 15.csv")
+df2 <- read.csv("/Users/aminashenasa/Downloads/Acoustic_Indices - Test_Sandy_Cove_HydroMoth_15.csv") # Replace with your second file path
+
+# 2. Find row indices where data does not match
+mismatched_rows <- which(rowSums(df1 != df2, na.rm = TRUE) > 0)
+
+# 3. View the mismatched rows
+df1[mismatched_rows, ]
+df2[mismatched_rows, ]
+
+```
+
+```{r}
+# Double check your paths are distinct
+print(original)
+print(test)
+
+```
+
+```{r}
+# Define file paths
+original <- "/Users/aminashenasa/Downloads/Acoustic_Indices - Copy of Crow Island_HydroMoth 0.5.csv"
+test <- "/Users/aminashenasa/Downloads/Acoustic_Indices - Test_Crow_Island_HydroMoth_0.5.csv"
+
+# Compare MD5 checksums
+is_identical <- tools::md5sum(original) == tools::md5sum(test)
+
+# Print result (TRUE or FALSE)
+print(is_identical)
+
+```
+
+```{r}
+print(original)
+print(test)
+```

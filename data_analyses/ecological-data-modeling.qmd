@@ -40,59 +40,160 @@ plot(dispersion)
 
 ```{r}
 library(ggtext)
+hab_cols_named <- c("BARREN" = "#F8766D", "MACRO" = "#00BFC4")
 
-site_labels <- c(
-  "HARRIS ISLAND"  = "<span style='color:red'>HARRIS ISLAND</span>",
-  "SAMSING COVE"   = "<span style='color:red'>SAMSING COVE</span>",
-  "SANDY COVE"     = "<span style='color:red'>SANDY COVE</span>",
-  "BATTERY ISLAND" = "<span style='color:blue'>BATTERY ISLAND</span>",
-  "CROW ISLAND"    = "<span style='color:blue'>CROW ISLAND</span>",
-  "MIDDLE ISLAND"  = "<span style='color:blue'>MIDDLE ISLAND</span>"
-)
-
-nmds <- metaMDS(comm, distance = "bray", k = 2, trymax = 100)
-nmds$stress
-
-scores_df <- as.data.frame(scores(nmds, display = "sites"))
-scores_df$TYPE <- filtered_algae_invert_swath$TYPE
-scores_df$SITE <- filtered_algae_invert_swath$SITE
-
-ggplot(scores_df, aes(x = NMDS1, y = NMDS2, color = TYPE, shape = SITE)) +
-  geom_point(size = 3, alpha = 0.8) +
+community_nmds <- ggplot(scores_df, aes(x = NMDS1, y = NMDS2, color = TYPE, shape = SITE)) +
+  geom_point(size = 3, alpha = 1) +
   scale_shape_manual(
     values = c(
-      "HARRIS ISLAND"  = 16,
-      "SAMSING COVE"   = 17,
-      "SANDY COVE"     = 15,
-      "BATTERY ISLAND" = 3,
-      "CROW ISLAND"    = 7,
-      "MIDDLE ISLAND"  = 8
+      "BATTERY ISLAND" = 3,  "CROW ISLAND"  = 7,  "MIDDLE ISLAND" = 8,
+      "HARRIS ISLAND"  = 16, "SAMSING COVE" = 17, "SANDY COVE"    = 15
     ),
     labels = site_labels,
     limits = c(
-      "HARRIS ISLAND",
-      "SAMSING COVE",
-      "SANDY COVE",
-      "BATTERY ISLAND",
-      "CROW ISLAND",
-      "MIDDLE ISLAND"
+      "BATTERY ISLAND", "CROW ISLAND", "MIDDLE ISLAND",
+      "HARRIS ISLAND", "SAMSING COVE", "SANDY COVE"
     )
   ) +
   stat_ellipse(aes(group = TYPE), level = 0.95, linetype = "dashed") +
-  scale_color_manual(values = c("BARREN" = "red", "MACRO" = "blue")) +
-  theme_classic() +
-  theme(legend.text = element_markdown()) +
+  scale_color_manual(
+    values = hab_cols_named,
+    labels = c("BARREN" = "Urchin Barren", "MACRO" = "*Macrocystis* Forest")
+  ) +
+  theme_urchin(base_size = 13) +
+  theme(
+    legend.position     = "right",
+    panel.grid.major.y  = element_blank(),   # remove horizontal gridlines
+    panel.grid.major.x  = element_blank(),   # already off in theme, kept explicit for clarity
+    axis.line           = element_line(colour = "grey20", linewidth = 0.4)
+  ) +
   labs(
-    title = paste0("NMDS of Community Structures (Stress = ",
+    title = paste0("NMDS of community structure (stress = ",
                    round(nmds$stress, 3), ")"),
     color = "Habitat Type",
     shape = "Site"
   )
-# Inside scale_shape_manual() or scale_color_manual(), add:
-labels = site_labels
 
-# Inside theme(), add:
-legend.text = element_markdown()
+community_nmds
+
+ggsave("community_nmds.pdf", community_nmds)
+```
+
+```{r}
+# Extract top contributors directly from the simper object
+simper_summary <- summary(simper_result)  # simper_result = your simper() output
+simper_top <- simper_summary$BARREN_MACRO  # replace with your actual comparison name, e.g. summary(simper_result)$"BARREN_MACRO"
+
+# Keep top N contributors by cumulative contribution or raw average, filtered to significant ones
+simper_species <- simper_top |>
+  tibble::rownames_to_column("species") |>
+  dplyr::filter(p <= 0.05) |>
+  dplyr::slice_max(average, n = 5)
+
+# Match these species names to their NMDS species scores (from your ordination)
+species_scores_top <- as.data.frame(scores(nmds, display = "species"))
+species_scores_top$species <- rownames(species_scores_top)
+species_scores_top <- dplyr::semi_join(species_scores_top, simper_species, by = "species")
+```
+
+```{r}
+community_nmds_vec <- ggplot(scores_df, aes(x = NMDS1, y = NMDS2, color = TYPE, shape = SITE)) +
+  geom_point(size = 3, alpha = 1) +
+  scale_shape_manual(
+    values = c(
+      "BATTERY ISLAND" = 3,  "CROW ISLAND"  = 7,  "MIDDLE ISLAND" = 8,
+      "HARRIS ISLAND"  = 16, "SAMSING COVE" = 17, "SANDY COVE"    = 15
+    ),
+    labels = site_labels,
+    limits = c(
+      "BATTERY ISLAND", "CROW ISLAND", "MIDDLE ISLAND",
+      "HARRIS ISLAND", "SAMSING COVE", "SANDY COVE"
+    )
+  ) +
+  stat_ellipse(aes(group = TYPE), level = 0.95, linetype = "dashed") +
+  geom_segment(
+    data = species_scores_top,
+    aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
+    inherit.aes = FALSE,
+    arrow = arrow(length = unit(0.2, "cm")),
+    color = "grey30", linewidth = 0.15
+  ) +
+  scale_color_manual(
+    values = hab_cols_named,
+    labels = c("BARREN" = "Urchin Barren", "MACRO" = "*Macrocystis* Forest")
+  ) +
+  labs(
+    title = paste0("NMDS of community structure (stress = ",
+                   round(nmds$stress, 3), ")"),
+    color = "Habitat Type",
+    shape = "Site"
+  ) +
+  theme_urchin(base_size = 13) +
+  theme(
+    legend.position    = "right",
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.background   = element_rect(fill = "white", color = NA),
+    axis.line          = element_line(colour = "grey20", linewidth = 0.4)
+  )
+
+community_nmds_vec
+
+ggsave("community_nmds_vectors.pdf", community_nmds_vec)
+```
+
+```{r}
+community_nmds_vec <- ggplot(scores_df, aes(x = NMDS1, y = NMDS2, color = TYPE, shape = SITE)) +
+  geom_point(size = 3, alpha = 1) +
+  scale_shape_manual(
+    values = c(
+      "BATTERY ISLAND" = 3,  "CROW ISLAND"  = 7,  "MIDDLE ISLAND" = 8,
+      "HARRIS ISLAND"  = 16, "SAMSING COVE" = 17, "SANDY COVE"    = 15
+    ),
+    labels = site_labels,
+    limits = c(
+      "BATTERY ISLAND", "CROW ISLAND", "MIDDLE ISLAND",
+      "HARRIS ISLAND", "SAMSING COVE", "SANDY COVE"
+    )
+  ) +
+  stat_ellipse(aes(group = TYPE), level = 0.95, linetype = "dashed") +
+  geom_segment(
+    data = species_scores_top,
+    aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
+    inherit.aes = FALSE,
+    arrow = arrow(length = unit(0.2, "cm")),
+    color = "grey30", linewidth = 0.2
+  ) +
+  geom_text_repel(
+    data = species_scores_top,
+    aes(x = NMDS1, y = NMDS2, label = species),
+    inherit.aes = FALSE,
+    color = "grey20", size = 3.2, fontface = "italic",
+    segment.color = "grey50", segment.size = 0.2,
+    min.segment.length = 0, box.padding = 0.3, point.padding = 0.2,
+    max.overlaps = Inf, seed = 42
+  ) +
+  scale_color_manual(
+    values = hab_cols_named,
+    labels = c("BARREN" = "Urchin Barren", "MACRO" = "*Macrocystis* Forest")
+  ) +
+  labs(
+    title = paste0("NMDS of community structure (stress = ",
+                   round(nmds$stress, 3), ")"),
+    color = "Habitat Type",
+    shape = "Site"
+  ) +
+  theme_urchin(base_size = 13) +
+  theme(
+    legend.position    = "right",
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.background   = element_rect(fill = "white", color = NA),
+    axis.line          = element_line(colour = "grey20", linewidth = 0.4)
+  )
+
+community_nmds_vec
+
 ```
 
 ### SIMPER
@@ -107,3 +208,691 @@ simper_result <- simper(
 summary(simper_result)
 # Top contributors to BARREN vs MACRO dissimilarity
 ```
+
+### SVM Dissimilarity
+
+```{r}
+library(vegan)
+library(dplyr)
+library(ggplot2)
+
+
+# Site-level community matrix (aggregate the swath data to 6 sites)
+#    comm is per-segment; collapse to one row per SITE for the 6-site analysis.
+
+site_key <- filtered_algae_invert_swath$SITE
+comm_site <- rowsum(comm, group = site_key)          # sum abundances per site
+# (use aggregate/means instead if your Bray-Curtis was built on mean abundance)
+
+site_names <- rownames(comm_site)
+
+# Community dissimilarity (Bray-Curtis) among the 6 sites
+comm_diss <- vegdist(comm_site, method = "bray")
+
+
+# Acoustic dissimilarity (Euclidean) among the same 6 sites,
+#    from the SVM mean barren probability per site.
+#    Build a named vector: mean SVM barren prob per site.
+
+prob_by_site_svm <- habitat_model_data %>%
+  mutate(prob = prob_barren) %>%
+  group_by(site) %>%
+  summarise(mean_prob = mean(prob, na.rm = TRUE), .groups = "drop")
+
+# align the acoustic sites to the SAME order as comm_site's rownames
+# (normalize case/spacing so the two site labelings match)
+norm <- function(x) toupper(trimws(gsub("[_]+", " ", x)))
+prob_vec <- prob_by_site_svm$mean_prob[
+  match(norm(site_names), norm(prob_by_site_svm$site))
+]
+names(prob_vec) <- site_names
+stopifnot(!any(is.na(prob_vec)))       # halts if any site failed to match
+
+acoustic_diss <- dist(prob_vec, method = "euclidean")   # 15 pairwise distances
+
+# Pair the two dissimilarity sets into 15 rows
+
+pair_labels <- t(combn(site_names, 2))
+diss_df <- data.frame(
+  site_a    = pair_labels[, 1],
+  site_b    = pair_labels[, 2],
+  comm_diss = as.vector(comm_diss) * 100,   # scale to 0-100 like the JMP y-axis
+  acou_diss = as.vector(acoustic_diss)
+)
+
+# label each pair by type combination (MacroMacro / BarrensBarrens / BarrensMacro)
+site_type <- filtered_algae_invert_swath %>%
+  distinct(SITE, TYPE) %>%
+  mutate(SITE = norm(SITE))
+type_of <- setNames(site_type$TYPE, site_type$SITE)
+lab_pair <- function(a, b) {
+  ta <- type_of[norm(a)]; tb <- type_of[norm(b)]
+  paste0(sort(c(ifelse(ta=="BARREN","Barrens","Macro"),
+                ifelse(tb=="BARREN","Barrens","Macro"))), collapse = "")
+}
+diss_df$pair_type <- mapply(lab_pair, diss_df$site_a, diss_df$site_b)
+
+# log fit
+fit <- lm(comm_diss ~ log(acou_diss), data = diss_df)
+s <- summary(fit); f <- s$fstatistic
+cat(sprintf("R2 = %.4f  F(%d,%d) = %.2f  p = %.4f\n",
+            s$r.squared, f[2], f[3], f[1],
+            pf(f[1], f[2], f[3], lower.tail = FALSE)))
+cat(sprintf("Community diss = %.4f + %.4f * log(Acoustic diss)\n",
+            coef(fit)[1], coef(fit)[2]))
+
+# plot
+p_fig8 <- ggplot(diss_df, aes(acou_diss, comm_diss)) +
+  geom_smooth(method = "lm", formula = y ~ log(x), se = FALSE,
+              colour = "sienna3", linewidth = 1) +
+  geom_text(aes(label = pair_type), size = 3, colour = "grey20") +
+  labs(x = "Acoustic dissimilarity",
+       y = "Community dissimilarity") +
+  theme_bw(base_size = 13) +
+  theme(panel.grid.minor = element_blank())
+
+print(p_fig8)
+ggsave("figure8_svm_dissimilarity.png", p_fig8, width = 8, height = 6, dpi = 150)
+```
+
+```{r}
+p_fig8 <- ggplot(diss_df, aes(acou_diss, comm_diss)) +
+  geom_smooth(method = "lm", formula = y ~ log(x), se = TRUE,
+              colour = "black", fill = "grey85", linewidth = 1) +
+  geom_point(aes(colour = pair_type), size = 3) +
+  scale_colour_manual(
+    values = c("MacroMacro"     = "steelblue3",
+               "BarrensBarrens" = "firebrick3",
+               "BarrensMacro"   = "orchid3"),
+    name = "Site pair",
+    labels = c("MacroMacro" = "Forest–Forest",
+               "BarrensBarrens" = "Barren–Barren",
+               "BarrensMacro" = "Forest–Barren")) +
+  annotate("text",
+           x = -Inf, y = Inf,
+           label = lab_text, hjust = -0.1, vjust = 1.5, size = 4, colour = "grey20") +
+  labs(x = "Acoustic dissimilarity", y = "Community dissimilarity") +
+  theme_bw(base_size = 13) +
+  theme(panel.grid.minor = element_blank(), legend.position = "bottom")
+p_fig8
+
+ggsave("svm_dissimilarity.png", p_fig8,
+       width = 9, height = 5.5, dpi = 300)
+```
+
+## Ecological plots
+
+```{r}
+eco_data <- read.csv(PATH_ECO) %>%
+  rename(
+    red_urchin_biomass   = `Mean.Mean.Red.Urchin.Biomass...m2.`,
+    stipe_density        = `Mean.Mean.Stipe.Density..m.2..`,
+    red_urchin_density   = `Mean.Strongylocentrotus.franciscanus..red.urchin.m.2.`,
+    green_urchin_density = `Mean.Strongylocentrotus..green.urchin.m.2.`
+  ) %>%
+  mutate(join_key = tolower(SITE))
+
+ECO_VARS <- c(red_urchin_density   = "Red urchin density (m\u00B2)",
+              red_urchin_biomass   = "Red urchin biomass (m\u00B2)",
+              green_urchin_density = "Green urchin density (m\u00B2)",
+              stipe_density        = "Macrocystis stipe density (m\u00B2)")
+```
+
+```{r}
+library(dplyr)
+# summaries
+# Ensure factors and string assignments match perfectly
+eco_by_type <- site_data %>%
+  mutate(type_label = factor(
+    if_else(true_type == "Macro_Forest", "Macrocystis Forest", "Urchin Barren"), # Fix: Capital F
+    levels = c("Macrocystis Forest", "Urchin Barren"))) %>%
+  group_by(type_label) %>%
+  summarise(
+    red_mean   = mean(red_urchin_density, na.rm = TRUE),
+    red_se     = sd(red_urchin_density,   na.rm = TRUE) / sqrt(n()),
+    stipe_mean = mean(stipe_density,      na.rm = TRUE),
+    stipe_se   = sd(stipe_density,        na.rm = TRUE) / sqrt(n()),
+    .groups = "drop")
+
+# fixed left-to-right site order: forests first, then barrens
+SITE_ORDER <- c("Battery Island", "Crow Island", "Middle Island",   # forests
+                "Harris Island", "Sandy Cove", "Samsing Cove")       # barrens
+
+# by SITE (one value per site)
+eco_by_site <- site_data %>%
+  mutate(
+    site_label = tools::toTitleCase(gsub("_", " ", site)),
+    type_label = factor(
+      if_else(true_type == "Macro_Forest", "Macrocystis Forest", "Urchin Barren"),
+      levels = c("Macrocystis Forest", "Urchin Barren")),
+    site_label = factor(site_label, levels = SITE_ORDER)
+  )
+
+# guard: catch any label that doesn't match SITE_ORDER (would silently vanish)
+stopifnot(!anyNA(eco_by_site$site_label)) 
+
+```
+
+```{r}
+library(ggplot2)
+library(ggtext)
+
+# 1. Update your type plots with HTML italics and element_markdown()
+p_stipe_type <- ggplot(eco_by_type, aes(type_label, stipe_mean, fill = type_label)) +
+  geom_col(width = 0.65) +
+  geom_errorbar(aes(ymin = stipe_mean - stipe_se, ymax = stipe_mean + stipe_se),
+                width = 0.15, linewidth = 0.4) +
+  geom_label(aes(label = sprintf("%.2f", stipe_mean), y = pmax(stipe_mean, 0.06)),
+             size = 3.3, colour = "grey20", fill = "white",
+             label.size = 0, label.padding = unit(0.1, "lines")) +
+  
+  # SWAP expressions out for clean HTML styling strings:
+  scale_x_discrete(labels = c(
+    "Macrocystis Forest" = "<i>Macrocystis</i> forest",
+    "Urchin Barren"      = "Urchin barren"
+  )) +
+  
+  scale_y_continuous(expand = expansion(mult = c(0, 0.08))) +
+  labs(x = NULL, y = expression(italic("Macrocystis") ~ "stipe density (m"^-2*")")) +
+  hab_fill() + guides(fill = "none") +
+  theme_urchin(base_size = 13) +
+  
+  # FORCE the theme to allow markdown styling on the x-axis:
+  theme(axis.text.x = element_markdown()) 
+
+
+p_red_type <- ggplot(eco_by_type, aes(type_label, red_mean, fill = type_label)) +
+  geom_col(width = 0.65) +
+  geom_errorbar(aes(ymin = red_mean - red_se, ymax = red_mean + red_se),
+                width = 0.15, linewidth = 0.4) +
+  geom_label(aes(label = sprintf("%.2f", red_mean), y = pmax(red_mean, 0.06)),
+             size = 3.3, colour = "grey20", fill = "white",
+             label.size = 0, label.padding = unit(0.1, "lines")) +
+  
+  # SWAP expressions out for clean HTML styling strings:
+  scale_x_discrete(labels = c(
+    "Macrocystis Forest" = "<i>Macrocystis</i> forest",
+    "Urchin Barren"      = "Urchin barren"
+  )) +
+  
+  scale_y_continuous(expand = expansion(mult = c(0, 0.08))) +
+  labs(x = NULL, y = expression("Red urchin density (m"^-2*")")) +
+  hab_fill() + guides(fill = "none") +
+  theme_urchin(base_size = 13) +
+  
+  # FORCE the theme to allow markdown styling on the x-axis:
+  theme(axis.text.x = element_markdown())
+
+# by site (fixed order)
+p_red_site <- ggplot(eco_by_site, aes(site_label, red_urchin_density, fill = type_label)) +
+  geom_col(width = 0.7) +
+  geom_text(aes(label = sprintf("%.2f", red_urchin_density)),
+            vjust = -0.5, size = 3, colour = "grey40") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.08))) +
+  labs(x = "Site", y = expression("Red urchin density (m"^-2*")")) +
+  hab_fill("Site type") +
+  theme_urchin(base_size = 13, angle_x = 30)
+
+p_stipe_site <- ggplot(eco_by_site, aes(site_label, stipe_density, fill = type_label)) +
+  geom_col(width = 0.7) +
+  geom_text(aes(label = sprintf("%.2f", stipe_density)),
+            vjust = -0.5, size = 3, colour = "grey40") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.08))) +
+  labs(x = "Site", y = expression(italic("Macrocystis") ~ "stipe density (m"^-2*")")) +
+  hab_fill("Site type") +
+  theme_urchin(base_size = 13, angle_x = 30)
+
+p_stipe_type; p_red_type; p_red_site; p_stipe_site
+
+```
+
+```{r}
+library(grid)
+
+# Helper function to cleanly export an egg-aligned gtable object to an exact-fit PDF
+save_fixed_gtable <- function(filename, gtable_obj) {
+  # 1. Open the PDF engine device
+  # (No need to provide hardcoded inches; grid automatically reads the gtable layout sizes)
+  pdf(filename, 
+      width = convertWidth(sum(gtable_obj$widths), "in", valueOnly = TRUE), 
+      height = convertHeight(sum(gtable_obj$heights), "in", valueOnly = TRUE))
+  
+  # 2. Draw the plot cleanly on the native canvas grid
+  grid.draw(gtable_obj)
+  
+  # 3. Safely turn off and write the file
+  dev.off()
+}
+
+# ---- EXECUTE PERFECTLY-SIZED SAVES ----
+save_fixed_gtable("fig_red_type.pdf",   p_red_type_fx)
+save_fixed_gtable("fig_stipe_type.pdf", p_stipe_type_fx)
+save_fixed_gtable("fig_red_site.pdf",   p_red_site_fx)
+save_fixed_gtable("fig_stipe_site.pdf", p_stipe_site_fx)
+
+```
+
+## Map of Sites
+
+Loading packages
+
+```{r}
+library(sf)
+library(terra)
+library(ggplot2)
+library(ggspatial)
+library(cowplot)
+library(maptiles)
+library(ggnewscale)   
+library(ggstar)
+library(ggrepel)
+library(rnaturalearth)
+library(osmdata)
+```
+
+Site data
+
+```{r}
+sites <- data.frame(
+  site = c("Crow Island","Middle Island","Battery Island",
+           "Harris Island","Samsing Cove","Sandy Cove"),
+  type = c("Macrocystis forest","Macrocystis forest","Macrocystis forest",
+           "Urchin barren","Urchin barren","Urchin barren"),
+  x = c(-135.47399,-135.45316,-135.38126,-135.27785,-135.35305,-135.32650),
+  y = c( 57.11711,  57.08433,  57.06040,  57.03242,  56.98664,  56.98737)
+)
+
+# Sitka Sound sits in UTM zone 8N (EPSG:32608). Working in a projected CRS
+# (metres) gives an accurate scale bar and a meaningful north arrow.
+utm_crs   <- 32608
+sites_sf  <- st_as_sf(sites, coords = c("x","y"), crs = 4326)
+sites_utm <- st_transform(sites_sf, utm_crs)
+```
+
+```{r}
+hab_star <- c("Macrocystis forest" = 15,   # filled circle
+              "Urchin barren"      = 1)    # 5-point star
+```
+
+```{r}
+library(sf)
+library(osmdata)
+library(ggplot2)
+library(ggstar) # Assumed for geom_star
+library(cowplot)
+library(rnaturalearth)
+
+# ---- 1. SETUP SITES DATA ----
+sites <- data.frame(
+  site = c("Crow Island","Middle Island","Battery Island",
+           "Harris Island","Samsing Cove","Sandy Cove"),
+  type = c("Macrocystis forest","Macrocystis forest","Macrocystis forest",
+           "Urchin barren","Urchin barren","Urchin barren"),
+  x = c(-135.47399,-135.45316,-135.38126,-135.27785,-135.35305,-135.32650),
+  y = c( 57.11711,  57.08433,  57.06040,  57.03242,  56.98664,  56.98737)
+)
+
+utm_crs   <- 32608
+sites_sf  <- st_as_sf(sites, coords = c("x","y"), crs = 4326)
+sites_utm <- st_transform(sites_sf, utm_crs)
+
+# ---- 2. DEFINE BOUNDING BOX FRAME ----
+view_ratio     <- 16 / 9
+view_height_km <- 18
+
+ctr    <- st_coordinates(st_centroid(st_combine(sites_utm)))[1, ]
+half_h <- view_height_km * 1000 / 2
+half_w <- half_h * view_ratio
+frame  <- st_bbox(c(xmin = ctr[["X"]] - half_w, xmax = ctr[["X"]] + half_w,
+                    ymin = ctr[["Y"]] - half_h, ymax = ctr[["Y"]] + half_h),
+                  crs = utm_crs)
+
+bbox_ll <- st_bbox(st_transform(st_as_sfc(frame), 4326))
+pad     <- 0.15
+osm_bbox <- c(bbox_ll["xmin"] - pad, bbox_ll["ymin"] - pad,
+              bbox_ll["xmax"] + pad, bbox_ll["ymax"] + pad)
+names(osm_bbox) <- c("xmin","ymin","xmax","ymax")
+
+options(tigris_class = "sf")
+options(tigris_use_cache = TRUE) # Enabled local caching as recommended
+
+# ---- 3. HIGH-RESOLUTION LOCAL TIGER BASEMAP ----
+view_ratio     <- 16 / 9
+view_height_km <- 18
+
+ctr    <- st_coordinates(st_centroid(st_combine(sites_utm)))[1, ]
+half_h <- view_height_km * 1000 / 2
+half_w <- half_h * view_ratio
+frame  <- st_bbox(c(xmin = ctr[["X"]] - half_w, xmax = ctr[["X"]] + half_w,
+                    ymin = ctr[["Y"]] - half_h, ymax = ctr[["Y"]] + half_h),
+                  crs = utm_crs)
+
+frame_sfc <- st_as_sfc(frame)
+
+# 1. Download official high-res shapes
+alaska_land <- area_water(state = "AK", county = "Sitka", year = 2023)
+
+# 2. Invert and force into a proper full sf data frame layer
+coast_polys_filled <- tryCatch({
+  water_projected <- st_transform(alaska_land, utm_crs)
+  geom_diff <- st_difference(frame_sfc, st_union(water_projected))
+  
+  # FIX: Convert the raw geometry (sfc) into a true sf object layer
+  st_sf(geometry = geom_diff)
+}, error = function(e) {
+  fallback <- states(year = 2023) |> 
+    subset(NAME == "Alaska") |> 
+    st_transform(utm_crs) |> 
+    st_intersection(frame_sfc)
+  st_sf(geometry = st_geometry(fallback))
+})
+
+# This assignment now safely succeeds because coast_polys_filled is a true sf object
+st_agr(coast_polys_filled) <- "constant"
+
+
+# ---- 4. AESTHETICS AND MAPPING LAYERS ----
+# Map your types directly to the aesthetic settings
+hab_star <- c("Macrocystis forest" = 15, "Urchin barren" = 1) 
+hab_cols <- c("Macrocystis forest" = "#00BFC4", "Urchin barren" = "#F8766D") 
+hab_labs <- c("Macrocystis forest" = expression(italic("Macrocystis") ~ "forest"), "Urchin barren" = "Urchin barren")
+
+# ---- MAIN MAP LAYOUT ----
+main <- ggplot() +
+  # Draw land polygons
+  geom_sf(data = coast_polys_filled, fill = "grey80", color = "grey40", linewidth = 0.3) + 
+
+  # Draw data layers using your loaded sites_utm spatial object
+  geom_star(data = sites_utm, aes(geometry = geometry, starshape = type, fill = type),
+            stat = "sf_coordinates", size = 4, color = "black", starstroke = 0.5) +
+
+  scale_fill_manual(name = NULL, values = hab_cols, labels = hab_labs) +
+  scale_starshape_manual(name = NULL, values = hab_star, labels = hab_labs) +
+
+         # 1. SCALE BAR (Stays cleanly anchored in the bottom right corner)
+  ggspatial::annotation_scale(
+    location = "br", 
+    width_hint = 0.20, 
+    pad_x = unit(0.5, "cm"), 
+    pad_y = unit(0.4, "cm"),
+    text_col = "black", 
+    line_col = "black", 
+    bar_cols = c("black", "white"),
+    style = "ticks", 
+    text_cex = 0.8
+  ) +
+  
+  # 2. MOVED NORTH ARROW (Relocated to the bottom-left corner)
+  ggspatial::annotation_north_arrow(
+    location = "bl", # Changed to Bottom Left
+    which_north = "grid",
+    height = unit(0.6, "cm"), # Maintained the clean, minimal size
+    width = unit(0.6, "cm"),  
+    pad_x = unit(0.6, "cm"),  # Slightly pushed away from the left border line
+    pad_y = unit(0.4, "cm"),  # Matches the bottom border spacing baseline
+    style = ggspatial::north_arrow_orienteering(
+      text_col = "black", 
+      line_col = "black",
+      fill = c("white", "black")
+    )
+  ) +
+
+  coord_sf(crs = utm_crs,
+           xlim = c(frame[["xmin"]], frame[["xmax"]]),
+           ylim = c(frame[["ymin"]], frame[["ymax"]]),
+           expand = FALSE) +
+  theme_minimal(base_size = 11) +
+   theme(
+    panel.background = element_rect(fill = "white", color = NA), 
+    panel.border      = element_rect(color = "black", fill = NA, linewidth = 0.8),
+    panel.grid.major  = element_line(color = "grey70", linewidth = 0.2),
+    panel.grid.minor  = element_blank(),
+    axis.text         = element_text(size = 8, color = "black"),
+    axis.title        = element_blank(),
+    legend.position   = c(0.85, 0.92),
+    legend.title      = element_blank(),  
+    legend.text       = element_text(size = 11),
+    legend.key        = element_blank(),
+    legend.background = element_rect(fill = scales::alpha("white", 0.9), color = NA),
+    legend.margin     = margin(4, 8, 4, 8),
+    plot.margin       = margin(2, 2, 2, 2)
+  )
+
+
+```
+
+```{r}
+
+# ---- 1. RESTORE ORIGINAL INSET VISUAL SCALING (140 KM BOUNDS) ----
+inset_half_km <- 140 
+inset_half_w  <- inset_half_km * 1000
+inset_half_h  <- inset_half_w
+
+inset_frame <- st_bbox(c(xmin = ctr[["X"]] - inset_half_w, xmax = ctr[["X"]] + inset_half_w,
+                          ymin = ctr[["Y"]] - inset_half_h, ymax = ctr[["Y"]] + inset_half_h),
+                        crs = utm_crs)
+
+inset_bbox_ll <- st_bbox(st_transform(st_as_sfc(inset_frame), 4326))
+
+
+# ---- 1. MOVE CAMERA WINDOW WESTWARD (CREATES WHITE SPACE ON THE LEFT) ----
+inset_half_km <- 140 
+inset_half_w  <- inset_half_km * 1000
+inset_half_h  <- inset_half_w
+
+# Subtracted 25,000 meters from the X center to pull more ocean into the left side
+inset_frame <- st_bbox(c(xmin = (ctr[["X"]] - 25000) - inset_half_w, 
+                          xmax = (ctr[["X"]] - 25000) + inset_half_w,
+                          ymin = ctr[["Y"]] - inset_half_h, 
+                          ymax = ctr[["Y"]] + inset_half_h),
+                        crs = utm_crs)
+
+inset_bbox_ll <- st_bbox(st_transform(st_as_sfc(inset_frame), 4326))
+
+
+# ---- REPLACES YOUR ENTIRE INSET BLOCK WITH FINAL ALIGNMENTS ----
+inset <- ggplot() +
+  geom_sf(data = alaska_inset_map, fill = "grey80", color = "grey40", linewidth = 0.2) +
+  geom_sf(data = study_box, fill = NA, color = "red", linewidth = 1.0) +
+  
+  # Southeast Alaska: Scooted left into the open white space to ensure high legibility
+  annotate(geom = "text", x = -136.9, y = 57.45, label = "Southeast\nAlaska", 
+           size = 3.6, fontface = "italic", color = "black", lineheight = 0.85, 
+           vjust = 0) +
+  
+  # Sitka: Left exactly where it belongs under the red box
+    # Sitka: Made bold to stand out clearly from the background map elements
+  annotate(geom = "text", x = -135.25, y = 56.80, label = "Sitka", 
+           size = 3.6, fontface = "bold", color = "black", 
+           hjust = 0, vjust = 0.5) +
+  
+  # Gulf of Alaska: Cleanly settled in the lower left marine zone
+  annotate(geom = "text", x = -137, y = 56.55, label = "Gulf of\nAlaska", 
+           size = 3.6, fontface = "italic", color = "grey30", lineheight = 0.85, 
+           hjust = 0.5) +
+           
+  coord_sf(xlim = c(inset_bbox_ll["xmin"], inset_bbox_ll["xmax"]),
+           ylim = c(inset_bbox_ll["ymin"], inset_bbox_ll["ymax"]),
+           expand = FALSE, datum = NA) +
+  theme_void() +
+  theme(
+    panel.border     = element_rect(color = "black", fill = NA, linewidth = 0.8),
+    panel.background = element_rect(fill = "white", color = NA),     
+    plot.background  = element_rect(fill = "transparent", color = NA) 
+  )
+
+
+# ---- 2. MAP COMPOSITE LAYOUT (LARGER VISUAL FOOTPRINT) ----
+map_composite <- ggdraw() +
+  draw_plot(main) +
+  # Expanded width/height to make the inset stand out and look crisp
+  draw_plot(inset, x = 0.05, y = 0.650, width = 0.26, height = 0.32)
+
+# ---- 3. FINAL PLOT COMBINATION ----
+final_output <- plot_grid(
+  title_theme,
+  map_composite,
+  ncol = 1,
+  rel_heights = c(0.08, 0.92)
+)
+
+# ---- 4. SAVE HIGH-RES OUTPUT ----
+out_height <- 8
+ggsave("sitka_sound_map.png",
+       final_output,
+       width = out_height * view_ratio,
+       height = out_height,
+       dpi = 400,
+       bg = "white",
+       scale = .6)
+
+# Display final result
+final_output
+
+```
+
+```{r}
+
+# Directly assign the composite map as the final output (removes title completely)
+final_output <- map_composite
+
+# save high res output
+out_height <- 8
+ggsave("sitka_sound_map.png",
+       final_output,
+       width = out_height * view_ratio,
+       height = out_height,
+       dpi = 400,
+       bg = "white",
+       scale = .6)
+
+# Display final result in your viewer window
+final_output
+
+```
+
+```{r}
+# ---- 5. SAVING ----
+out_height <- 8
+ggsave("sitka_sound_map.png",
+       final_output,
+       width = out_height * view_ratio,
+       height = out_height,
+       dpi = 400,
+       bg = "white",
+       scale = .6)
+
+final_output
+```
+
+```{r}
+# This prints the exact width of your map canvas in kilometers
+as.numeric(frame[["xmax"]] - frame[["xmin"]]) / 1000
+
+```
+
+## Urchin Biomass Equation
+
+To determine red sea urchin biomass, I created a biomass equation from Southeast Alaska red sea urchins to convert sea urchin density values to a more ecologically meaningful measure of grazer impact. Mesocentrotus franciscanus (red sea urchins) were collected from urchin barren sites (Harris Island, Sandy Cove, and Samsing Cove) and from one of the Macrocystis forest sites (Middle Island). Approximately 30 red sea urchins were collected from each urchin barren site (n = 88 total), and 12 from the Macrocystis forest site. Measurements of volume (ml), total body weight (g), test width (mm), and gonad weight (g), were taken from each urchin.
+
+```{r}
+library(here)
+urchin_gsi <- read.csv("/users/aminashenasa/soundscapes_data/data/ecological_data/urchin_gsi.csv")
+```
+
+```{r}
+library(ggplot2)
+
+set.seed(42)
+
+urchin_gsi <- urchin_gsi[!is.na(urchin_gsi$Test.Width..mm.) & !is.na(urchin_gsi$Total.Body.Weight..g.), ]
+
+x <- urchin_gsi$Test.Width..mm.
+y <- urchin_gsi$Total.Body.Weight..g.
+
+# Exponential 3P model
+# y = Asymptote + Scale * exp(GrowthRate * x)
+fit <- nls(y ~ Asymptote + Scale * exp(GrowthRate * x),
+           start = list(Asymptote = -30, Scale = 20, GrowthRate = 0.03),
+           control = nls.control(maxiter = 200))
+
+coefs <- coef(fit)
+rss <- sum(residuals(fit)^2)
+tss <- sum((y - mean(y))^2)
+rsq <- 1 - rss / tss
+
+cat("Coefficients:\n"); print(coefs)
+cat("R-squared:", rsq, "\n")
+
+pred_fun <- function(pars, xv) pars["Asymptote"] + pars["Scale"] * exp(pars["GrowthRate"] * xv)
+
+xseq <- seq(min(x), max(x), length.out = 200)
+fit_y <- pred_fun(coefs, xseq)
+
+# Bootstrap confidence band (nonparametric residual resampling) 
+resid0 <- residuals(fit)
+fitted0 <- fitted(fit)
+n <- length(y)
+B <- 1000
+boot_preds <- matrix(NA, nrow = B, ncol = length(xseq))
+
+for (b in seq_len(B)) {
+  y_star <- fitted0 + sample(resid0, n, replace = TRUE)
+  fit_b <- tryCatch(
+    nls(y_star ~ Asymptote + Scale * exp(GrowthRate * x),
+        start = as.list(coefs),
+        control = nls.control(maxiter = 100, warnOnly = TRUE)),
+    error = function(e) NULL
+  )
+  if (!is.null(fit_b)) {
+    boot_preds[b, ] <- pred_fun(coef(fit_b), xseq)
+  }
+}
+
+ci_lower <- apply(boot_preds, 2, quantile, probs = 0.025, na.rm = TRUE)
+ci_upper <- apply(boot_preds, 2, quantile, probs = 0.975, na.rm = TRUE)
+
+pred_df <- data.frame(x = xseq, y = fit_y, lower = ci_lower, upper = ci_upper)
+
+#  Annotation text 
+ann_text <- sprintf(
+  "y = %.2f + %.2f*exp(%.4f*x)\n R\u00b2 = %.4f",
+  coefs["Asymptote"], coefs["Scale"], coefs["GrowthRate"], rsq
+)
+
+# Plot
+blue <- "#4472C4"
+band <- "#B7C9EC"
+
+urchin_biomass <- ggplot() +
+  geom_ribbon(data = pred_df, aes(x = x, ymin = lower, ymax = upper),
+              fill = jmp_band, alpha = 0.55) +
+  geom_line(data = pred_df, aes(x = x, y = y),
+            color = jmp_blue, linewidth = 1) +
+  geom_point(data = urchin_gsi, aes(x = Test.Width..mm., y = Total.Body.Weight..g.),
+             shape = 21, fill = "black", color = "black", size = 2.4, stroke = 0.2) +
+annotate("text", x = -Inf, y = Inf, label = ann_text,
+         hjust = -0.05, vjust = 1.1, size = 3.6, family = "sans", color = "grey20") +
+  scale_x_continuous(breaks = seq(20, 100, by = 10),
+                      limits = c(min(x) - 3, max(x) + 3)) +
+  scale_y_continuous(breaks = seq(0, 400, by = 100),
+                      limits = c(min(0, min(y)) - 10, max(y) * 1.05)) +
+  labs(x = "Test Width (mm)", y = "Total Body Weight (g)",
+       title = "Fit Curve: Exponential 3P") +
+  theme_bw(base_size = 13, base_family = "sans") +
+  theme(
+    plot.title = element_text(face = "bold", size = 13, hjust = 0),
+    panel.grid.major = element_line(color = "grey88", linewidth = 0.3),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(color = "grey40", linewidth = 0.5),
+    axis.title = element_text(size = 12, face = "plain"),
+    axis.text = element_text(size = 10.5, color = "black"),
+    axis.ticks = element_line(color = "grey40")
+  )
+
+ggsave("urchin_biomass_plot.png", urchin_biomass, width = 6.2, height = 5.3, dpi = 200)
+
+urchin_biomass
+```
+
+## 

@@ -1,0 +1,7 @@
+"site","true_type","mean_gradient_score","n_sequences","pred_class","correct"
+"battery_island","Macro_Forest",0.189751127780391,7206,"Macro_Forest",TRUE
+"crow_island","Macro_Forest",0.284299955349668,7205,"Macro_Forest",TRUE
+"middle_island","Macro_Forest",0.415559190245755,7205,"Macro_Forest",TRUE
+"harris_island","Barren",0.553956606417331,7206,"Barren",TRUE
+"sandy_cove","Barren",0.747019908582019,7205,"Barren",TRUE
+"samsing_cove","Barren",0.80679020944998,7206,"Barren",TRUE

@@ -1,0 +1,558 @@
+---
+title: "cleaned-acoustic-data-modeling"
+format: html
+editor: visual
+---
+
+### Load packages
+
+```{r}
+#| message: false
+#| warning: false
+
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(lubridate)
+library(patchwork)
+library(ggrepel)
+library(kernlab)
+library(randomForest)
+library(MASS)
+library(conflicted)
+
+
+conflict_prefer("select",    "dplyr", quiet = TRUE)
+conflict_prefer("filter",    "dplyr", quiet = TRUE)
+conflict_prefer("mutate",    "dplyr", quiet = TRUE)
+conflict_prefer("summarise", "dplyr", quiet = TRUE)
+conflict_prefer("n",         "dplyr", quiet = TRUE)
+conflict_prefer("first",     "dplyr", quiet = TRUE)
+conflict_prefer("margin",    "ggplot2", quiet = TRUE)
+conflicts_prefer(kernlab::cross)
+conflicts_prefer(stats::step)
+
+
+set.seed(123)
+```
+
+```{r}
+# labels
+BARREN_LABEL <- "Barren"
+FOREST_LABEL <- "Macro_Forest"
+
+HABITAT_PREDICTORS <- c("ACI", "NDSI", "AEI", "ADI")
+URCHIN_PREDICTORS  <- c("ACI", "NDSI")
+
+HAB_LEVELS <- c("Urchin Barren", "Macrocystis Forest")
+
+# fixed left-to-right site order: forests first, then barrens
+SITE_ORDER <- c("Battery_Island", "Crow_Island", "Middle_Island",   # forests
+                "Harris_Island", "Sandy_Cove", "Samsing_Cove")       # barrens
+
+# time
+SITE_TZ    <- "America/Sitka"   # deployment is Sitka, AK (AKDT = UTC-8 in July)
+SOURCE_TZ  <- "UTC"             # HydroMoth RTC records UTC
+
+PLOT_DATES <- as.Date(c("2025-07-24", "2025-07-25", "2025-07-26", "2025-07-27"))
+
+# paths
+library(here)
+
+ACOUSTIC_DIR <- here("data", "acoustic_data", "filtered_data")
+
+PATH_CCA  <- here(ACOUSTIC_DIR, "Sage_Constraints_Experiment_CCA Urchin Indices.csv")
+PATH_ROCK <- here(ACOUSTIC_DIR, "Sage_Constraints_Experiment_Bare Rock Urchin Indices.csv")
+PATH_KELP <- here(ACOUSTIC_DIR, "Sage_Constraints_Experiment_Kelp Urchin Indices.csv")
+PATH_ECO  <- here("data", "ecological_data", "ecological_variables_summary.csv")
+
+stopifnot(all(file.exists(PATH_CCA, PATH_ROCK, PATH_KELP, PATH_ECO)))
+
+# SVM hyperparameters
+SVM_KERNEL <- "rbfdot"
+SVM_SIGMA  <- 0.25
+SVM_COST   <- 1
+
+# shared theme for all figures
+theme_urchin <- function(base_size = 13, angle_x = 0) {
+  theme_bw(base_size = base_size) +
+    theme(
+      panel.border       = element_blank(),
+      axis.line          = element_line(colour = "grey20", linewidth = 0.4),
+      axis.ticks         = element_line(colour = "grey20", linewidth = 0.4),
+      panel.grid.major.y = element_line(colour = "grey92", linewidth = 0.3),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor   = element_blank(),
+      axis.text.x        = element_markdown(angle = angle_x,          # <-- changed from element_text
+                                             hjust = if (angle_x == 0) 0.5 else 1),
+      plot.title         = element_text(size = base_size + 1, margin = margin(b = 8)),
+      strip.background   = element_blank(),
+      strip.text         = element_text(face = "bold", size = rel(0.85)),
+      legend.position     = "bottom",
+      legend.title        = element_text(size = rel(0.85)),
+      legend.text         = element_markdown(size = rel(0.85)),
+      axis.title.y        = element_text(size = rel(0.85), margin = margin(r = 4)),
+      panel.spacing.x     = unit(1, "lines")
+    )
+}
+
+hab_fill <- function(name = NULL) {
+  scale_fill_manual(
+    breaks = c("Macrocystis Forest", "Urchin Barren"),
+    values = c("Macrocystis Forest" = "#00BFC4", "Urchin Barren" = "#F8766D"),
+    labels = c("Macrocystis Forest" = "*Macrocystis* Forest",
+               "Urchin Barren"      = "Urchin Barren"),
+    name   = name
+  )
+}
+
+hab_cols <- c("Barren" = "#F8766D", "Macro_Forest" = "#00BFC4")
+hab_labs <- c("Barren" = "Urchin Barren", "Macro_Forest" = "*Macrocystis* Forest")
+```
+
+## Load Raw Habitat Data
+
+```{r}
+all_data <- readRDS(here("data", "derived", "all_data.rds"))
+
+eco_data <- read.csv(PATH_ECO) %>%
+  rename(
+    red_urchin_biomass   = `Mean.Mean.Red.Urchin.Biomass...m2.`,
+    stipe_density        = `Mean.Mean.Stipe.Density..m.2..`,
+    red_urchin_density   = `Mean.Strongylocentrotus.franciscanus..red.urchin.m.2.`,
+    green_urchin_density = `Mean.Strongylocentrotus..green.urchin.m.2.`
+  ) %>%
+  mutate(join_key = tolower(SITE))
+
+ECO_VARS <- c(red_urchin_density   = "Red urchin density (m\u00B2)",
+              red_urchin_biomass   = "Red urchin biomass (m\u00B2)",
+              green_urchin_density = "Green urchin density (m\u00B2)",
+              stipe_density        = "Macrocystis stipe density (m\u00B2)")
+```
+
+### Redoing model will full 5 days
+
+```{r}
+library(tidyverse)
+library(lubridate)
+
+tide_file <- "/Users/aminashenasa/soundscapes_data/data/environmental_data/noaa_july_tides_2025.txt"
+file.exists(tide_file)   # should print TRUE
+
+tide_all <- read_lines(tide_file) |>
+  keep(~ grepl("^\\d{4}/\\d{2}/\\d{2}", .x)) |>
+  I() |>
+  read_table(
+    col_names = c("date", "day", "time", "ampm", "amplitude"),
+    col_types = "ccccd"
+  ) |>
+  mutate(
+    datetime = as.POSIXct(paste(date, time, ampm),
+                          format = "%Y/%m/%d %I:%M %p",
+                          tz = "America/Sitka")
+  ) |>
+  select(datetime, amplitude)
+
+head(tide_all)
+```
+
+```{r}
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+start_akdt <- with_tz(start_datetime, "America/Sitka")
+end_akdt   <- with_tz(end_datetime,   "America/Sitka")
+
+noaa_tide_min <- tide_all |>
+  filter(datetime >= start_akdt, datetime <= end_akdt)
+
+noaa_tide <- noaa_tide_min |>
+  filter(minute(datetime) == 0)
+
+nrow(noaa_tide)       # expect 120
+nrow(noaa_tide_min)   # expect 7200
+range(noaa_tide$datetime)
+```
+
+```{r}
+noaa_tide |> filter(datetime == as.POSIXct("2025-07-24 00:00", tz = "America/Sitka"))
+# expect 10.81
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(patchwork)
+
+SITE_TZ    <- "America/Sitka"
+PLOT_DATES <- as.Date(c("2025-07-23", "2025-07-24", "2025-07-25",
+                        "2025-07-26", "2025-07-27", "2025-07-28"))
+
+# --- Tide table: full local days, hourly, from the new NOAA file ---
+tide_file <- "/Users/aminashenasa/soundscapes_data/data/environmental_data/noaa_july_tides_2025.txt"
+
+tide_all <- read_lines(tide_file) |>
+  keep(~ grepl("^\\d{4}/\\d{2}/\\d{2}", .x)) |>
+  I() |>
+  read_table(col_names = c("date", "day", "time", "ampm", "amplitude"),
+             col_types = "ccccd") |>
+  mutate(datetime = as.POSIXct(paste(date, time, ampm),
+                               format = "%Y/%m/%d %I:%M %p",
+                               tz = SITE_TZ)) |>
+  select(datetime, amplitude)
+
+noaa_tide <- tide_all |>
+  filter(as.Date(datetime, tz = SITE_TZ) %in% PLOT_DATES,
+         minute(datetime) == 0)
+
+stopifnot(nrow(noaa_tide) == 144)   # 6 days x 24 hours
+
+make_tidal_panel <- function(hab_data, tide_df = noaa_tide, pc1_col = "urchin_pc1",
+                             model_label = "SVM", keep_dates = PLOT_DATES,
+                             span = 0.45, smooth_tide = TRUE) {
+
+  agg <- hab_data %>%
+    filter(DATE %in% keep_dates) %>%
+    group_by(TYPE, DATE, HOUR) %>%
+    summarise(value = mean(.data[[pc1_col]], na.rm = TRUE),
+              se    = sd(.data[[pc1_col]], na.rm = TRUE) / sqrt(n()),
+              .groups = "drop")
+
+  # recorded hour range per date
+  rec <- hab_data %>%
+    filter(DATE %in% keep_dates) %>%
+    group_by(DATE) %>%
+    summarise(hmin = min(HOUR), hmax = max(HOUR), .groups = "drop")
+
+  # tide trimmed to the recorded hours
+  tide <- tide_df %>%
+    mutate(DATE = as.Date(datetime, tz = SITE_TZ),
+           HOUR = hour(datetime) + minute(datetime) / 60) %>%
+    filter(DATE %in% keep_dates) %>%
+    left_join(rec, by = "DATE") %>%
+    filter(HOUR >= hmin, HOUR <= hmax + 1) %>%
+    select(-hmin, -hmax)
+
+  missing_dates <- setdiff(as.character(keep_dates), as.character(unique(tide$DATE)))
+  if (length(missing_dates))
+    warning("No tide data for: ", paste(missing_dates, collapse = ", "))
+
+  tide_line <- if (smooth_tide) {
+    tide %>%
+      group_by(DATE) %>%
+      group_modify(~ {
+        s <- spline(.x$HOUR, .x$amplitude,
+                    xout = seq(min(.x$HOUR), max(.x$HOUR), by = 1/6))
+        tibble(HOUR = s$x, amplitude = s$y)
+      }) %>%
+      ungroup()
+  } else tide
+
+  base <- list(
+    facet_grid(. ~ DATE, scales = "free_x", space = "free_x"),
+    scale_x_continuous(breaks = seq(0, 24, 4)),
+    theme_bw(base_size = 11),
+    theme(panel.grid.minor = element_blank(),
+          axis.title.y = element_text(size = 9, margin = margin(r = 4)))
+  )
+  no_x     <- theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+  no_strip <- theme(strip.background = element_blank(), strip.text = element_blank())
+
+  one_panel <- function(type, colour, ylab, drop_x, drop_strip) {
+    p <- ggplot(filter(agg, TYPE == type), aes(HOUR, value)) +
+      geom_errorbar(aes(ymin = value - se, ymax = value + se),
+                    width = 0, colour = colour, alpha = 0.5) +
+      geom_point(colour = colour, size = 1.4) +
+      geom_smooth(method = "loess", span = span, se = FALSE,
+                  colour = colour, linewidth = 0.9) +
+      base + labs(x = NULL, y = ylab)
+    if (drop_x)     p <- p + no_x
+    if (drop_strip) p <- p + no_strip
+    p
+  }
+
+  p_forest <- one_panel(FOREST_LABEL, "#00BFC4", "Forest PC1", TRUE,  FALSE)
+  p_barren <- one_panel(BARREN_LABEL, "#F8766D", "Barren PC1", FALSE, TRUE) +
+    labs(x = "Hour (Sitka local)")
+
+  p_tide <- ggplot(tide_line, aes(HOUR, amplitude)) +
+    geom_line(linewidth = 0.6) +
+    geom_point(data = tide, size = 0.7, colour = "grey30") +
+    geom_hline(yintercept = 0, linetype = "dotted", colour = "grey60") +
+    base + no_x + no_strip +
+    labs(x = NULL, y = "Tide (ft MLLW)")
+
+  p_forest / p_tide / p_barren +
+    plot_annotation(
+      title = paste0("Urchin acoustic activity, tidal cycle, and time of day (",
+                     model_label, ")"),
+      subtitle = "PC1 oriented so HIGHER = more urchin acoustics",
+      caption = "Tide: NOAA harmonic predictions, Sitka station 9451600 (LST/LDT, MLLW)"
+    )
+}
+```
+
+```{r}
+plot_data <- habitat_model_data %>%
+  filter(full_datetime >= ymd_hms("2025-07-24 00:00:00", tz = "UTC"))
+
+p <- make_tidal_panel(plot_data)
+p
+# ggsave("tidal_panel.png", p, width = 16, height = 7, dpi = 300)
+```
+
+```{r}
+SITE_TZ    <- "America/Sitka"
+PLOT_DATES <- as.Date(c("2025-07-23", "2025-07-24", "2025-07-25",
+                        "2025-07-26", "2025-07-27", "2025-07-28"))
+
+# drop the lone 15-second clip so 07-23 starts at hour 16
+habitat_model_data <- habitat_model_data %>%
+  filter(full_datetime >= ymd_hms("2025-07-24 00:00:00", tz = "UTC"))
+```
+
+```{r}
+combined_df <- combined_df %>%
+  arrange(TYPE, site, DATE, HOUR) %>%
+  mutate(day_index = as.integer(DATE - min(PLOT_DATES)),
+         hour_continuous = HOUR + day_index * 24 - 16)   # 0 = 16:00 AKDT on 07-23
+```
+
+```{r}
+combined_df %>% count(TYPE, site)   # expect 120 rows each if no gaps (8 + 24*4 + 16)
+```
+
+```{r}
+july_data <- raw_data %>%
+  mutate(datetime_utc   = make_datetime(YY, MM, DD, hh, mm, tz = "UTC"),
+         datetime_local = with_tz(datetime_utc, "America/Sitka"),
+         WTMP   = if_else(WTMP >= 99, NA_real_, WTMP),
+         WTMP_F = WTMP * 1.8 + 32) %>%
+  filter(datetime_utc >= ymd_hms("2025-07-24 00:00:00", tz = "UTC"),
+         datetime_utc <= ymd_hms("2025-07-28 23:59:59", tz = "UTC"))
+
+wtmp_hourly <- july_data %>%
+  mutate(DATE = as.Date(datetime_local, tz = SITE_TZ),
+         HOUR = hour(datetime_local)) %>%
+  group_by(DATE, HOUR) %>%
+  summarise(wtmp_c = mean(WTMP, na.rm = TRUE),
+            wtmp_f = mean(WTMP_F, na.rm = TRUE),
+            n_obs  = sum(!is.na(WTMP)),
+            .groups = "drop")
+
+
+combined_df_extended <- combined_df %>%
+  select(-any_of(c("WTMP_F", "wtmp_c", "wtmp_f", "n_obs",
+                   "wtmp_c.x", "wtmp_f.x", "n_obs.x",
+                   "wtmp_c.y", "wtmp_f.y", "n_obs.y"))) %>%
+  left_join(wtmp_hourly, by = c("DATE", "HOUR"))
+
+names(combined_df_extended)   # should have exactly one wtmp_c, wtmp_f, n_obs
+
+combined_df_extended %>%
+  summarise(n_missing_temp = sum(is.na(wtmp_c) | is.nan(wtmp_c)))
+
+combined_df_extended %>% count(TYPE, site)   # expect 120 each
+```
+
+```{r}
+
+combined_df_extended %>%
+  summarise(n_missing_temp = sum(is.na(wtmp_c) | is.nan(wtmp_c)))   # expect 0
+
+combined_df_extended %>% count(TYPE, site)   # expect 120 each
+
+combined_df_extended %>%
+  group_by(TYPE, site) %>%
+  summarise(min_h = min(hour_continuous), max_h = max(hour_continuous),
+            all_steps_1 = all(diff(hour_continuous) == 1), .groups = "drop")
+```
+
+```{r}
+# 1. Row count and coverage per site
+combined_df_extended %>% count(TYPE, site)          # expect 120 each if no gaps
+
+# 2. Sanity-check the temperature values and how many raw obs fed each hour
+combined_df %>%
+  summarise(min_c = min(wtmp_c), max_c = max(wtmp_c),
+            min_n = min(n_obs), max_n = max(n_obs))
+```
+
+```{r}
+wtmp_hourly %>% filter(n_obs < 10) %>% arrange(n_obs)
+```
+
+```{r}
+july_data %>%
+  filter(as.Date(datetime_local, tz = SITE_TZ) == as.Date("2025-07-24"),
+         hour(datetime_local) %in% 5:11) %>%
+  group_by(hour = hour(datetime_local)) %>%
+  summarise(n = sum(!is.na(WTMP)), first = first(WTMP), last = last(WTMP),
+            min = min(WTMP, na.rm = TRUE), max = max(WTMP, na.rm = TRUE))
+```
+
+```{r}
+# 1. Keep only complete rows once, so the PCA rows and the data rows are identical
+combined_df_pca <- combined_df_extended %>%
+  filter(complete.cases(tide, wtmp_f))
+
+pca_data <- combined_df_pca %>%
+  select(tide, wtmp_f)
+
+# 2. PCA on standardized tide and temperature
+tide_temp_pca <- prcomp(pca_data, center = TRUE, scale. = TRUE)
+
+summary(tide_temp_pca)     # variance explained by PC1
+tide_temp_pca$rotation     # loadings: check PC1 sign and direction
+
+# 3. Attach PC1 back to the table
+combined_df_pca <- combined_df_pca %>%
+  mutate(tide_temp_pc1 = tide_temp_pca$x[, "PC1"])
+
+cor(pca_data$tide, pca_data$wtmp_f)
+```
+
+```{r}
+names(combined_df_pca)          # should include tide_temp_pc1
+"tide_temp_pc1" %in% names(combined_df_extended)   # FALSE
+```
+
+```{r}
+library(car)
+m_lme_pca_extended <- lme(value ~ tide_temp_pc1 * elevation * TYPE,
+                  random = ~ 1 | site,
+                  correlation = corAR1(form = ~ hour_continuous | site),
+                  data = combined_df_pca)
+
+summary(m_lme_pca_extended)
+VarCorr(m_lme_pca_extended)
+Anova(m_lme_pca_extended, type = "III")
+```
+
+```{r}
+combined_df_pca %>% count(TYPE, site)       # expect 120 each
+sum(is.na(combined_df_pca$tide_temp_pc1))   # expect 0
+```
+
+```{r}
+# 1. Prediction grid from the new data
+pc_range <- range(combined_df_pca$tide_temp_pc1, na.rm = TRUE)
+pc_vals  <- seq(pc_range[1], pc_range[2], length.out = 30)
+
+elev_rng  <- range(combined_df_pca$elevation, na.rm = TRUE)
+elev_vals <- seq(elev_rng[1], elev_rng[2], length.out = 5)
+
+pc_range    # check: roughly -2 to 2?
+elev_rng    # check: close to -13.6 to 52.5?
+
+rg <- ref_grid(m_lme_pca_extended,
+               data = combined_df_pca,
+               at = list(tide_temp_pc1 = pc_vals,
+                         elevation     = elev_vals))
+
+preds <- as.data.frame(emmeans(rg, ~ tide_temp_pc1 * elevation * TYPE))
+
+preds$elevation_lab <- factor(preds$elevation,
+                              levels = elev_vals,
+                              labels = paste0("Sun: ", round(elev_vals, 1), "\u00B0"))
+```
+
+```{r}
+library(emmeans)
+library(ggtext)
+library(patchwork)
+library(scales)
+
+# 1. Prediction grid from the new data --------------------------------------
+pc_range <- range(combined_df_pca$tide_temp_pc1, na.rm = TRUE)
+pc_vals  <- seq(pc_range[1], pc_range[2], length.out = 30)
+
+elev_rng  <- range(combined_df_pca$elevation, na.rm = TRUE)
+elev_vals <- seq(elev_rng[1], elev_rng[2], length.out = 5)   # replaces the hardcoded values
+
+rg <- ref_grid(m_lme_pca_extended,
+               data = combined_df_pca,
+               at = list(tide_temp_pc1 = pc_vals,
+                         elevation     = elev_vals))
+preds <- as.data.frame(emmeans(rg, ~ tide_temp_pc1 * elevation * TYPE))
+
+preds$elevation_lab <- factor(preds$elevation,
+                              levels = elev_vals,
+                              labels = paste0("Sun: ", round(elev_vals, 1), "\u00B0"))
+
+# 2. Main emmeans plot -------------------------------------------------------
+p_emmeans <- ggplot(preds, aes(x = tide_temp_pc1, y = emmean,
+                               color = TYPE, fill = TYPE)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_ribbon(aes(ymin = lower.CL, ymax = upper.CL), alpha = 0.15, color = NA) +
+  geom_line(linewidth = 1) +
+  facet_wrap(~ elevation_lab, nrow = 1) +
+  scale_x_continuous(
+    breaks = c(-2, 0, 2),
+    labels = c("-2\nCool", "0", "2\nWarm")
+  ) +
+  scale_color_manual(name = "Habitat Type", values = hab_cols, labels = hab_labs) +
+  scale_fill_manual(name = "Habitat Type", values = hab_cols, labels = hab_labs) +
+  labs(x = "Tide/Temperature PC1<br><span style='font-size:10pt; color:grey40'>(high tide, cool \u2192 low tide, warm)</span>",
+       y = "Predicted sea urchin activity PC1<br><span style='font-size:10pt; color:grey40'>(low noise \u2192 high noise)</span>") +
+  theme_urchin() +
+  theme(panel.spacing.x = unit(0.6, "lines"),
+        axis.title.x = element_markdown(size = 12, lineheight = 1.2, margin = margin(t = 8)),
+        axis.title.y = element_markdown(size = 12, lineheight = 1.2, margin = margin(r = 8)))
+
+# 3. Solar-elevation gradient arrow -----------------------------------------
+sun_stops <- c(-13.83, -12, -6, 0, 10, 30, 52.5)         # physical elevations for colours
+sun_vals  <- rescale(sun_stops, from = elev_rng)
+sun_vals[1] <- 0; sun_vals[length(sun_vals)] <- 1        # pin ends in case range differs slightly
+
+sun_pal <- gradient_n_pal(
+  colours = c("#050B24", "#1B2A6B", "#4B3F9E", "#E8604C",
+              "#F7A93B", "#FFD84D", "#FFF3B0"),
+  values = sun_vals
+)
+elev_to_col <- function(e) {
+  sun_pal(rescale(pmin(pmax(e, elev_rng[1]), elev_rng[2]), from = elev_rng))
+}
+elev_to_x <- function(e) 0.1 + (e - elev_rng[1]) / diff(elev_rng) * 0.8
+
+n <- 300
+arrow_df <- data.frame(x = seq(0.01, 0.95, length.out = n))
+arrow_df$elev <- elev_rng[1] + (arrow_df$x - 0.1) / 0.8 * diff(elev_rng)
+arrow_df$col  <- elev_to_col(arrow_df$elev)
+w <- diff(arrow_df$x[1:2])
+
+head_df <- data.frame(x = c(0.95, 0.95, 1), y = c(0.1, 0.9, 0.5))
+dots_df <- data.frame(x = elev_to_x(elev_vals), col = elev_to_col(elev_vals))
+
+tick_df <- data.frame(elev = 0, lab = "Sunrise/Sunset")
+tick_df$x <- elev_to_x(tick_df$elev)
+
+p_arrow <- ggplot() +
+  geom_rect(data = arrow_df,
+            aes(xmin = x, xmax = x + w * 1.05, ymin = 0.3, ymax = 0.7, fill = col)) +
+  geom_polygon(data = head_df, aes(x, y), fill = elev_to_col(elev_rng[2])) +
+  geom_segment(data = tick_df, aes(x = x, xend = x, y = 0.3, yend = 0.7),
+               color = "white", linewidth = 0.6) +
+  geom_text(data = tick_df, aes(x = x, y = 0.12, label = lab), size = 2.8) +
+  geom_point(data = dots_df, aes(x, 0.5, fill = col),
+             shape = 21, size = 4, color = "white", stroke = 1) +
+  annotate("text", x = 0.1, y = 0.95, label = "Solar midnight",
+           size = 3.5, fontface = "bold", vjust = 0) +
+  annotate("text", x = 0.9, y = 0.95, label = "Solar noon",
+           size = 3.5, fontface = "bold", vjust = 0) +
+  scale_fill_identity() +
+  scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0, 1.4), expand = c(0, 0)) +
+  coord_cartesian(clip = "off") +
+  theme_void() +
+  theme(plot.margin = margin(8, 5.5, 0, 30))
+
+# 4. Combine and save --------------------------------------------------------
+p_final <- p_arrow / p_emmeans +
+  plot_layout(heights = c(0.16, 1))
+
+p_final
+ggsave("emmeans_tidetemp_type_elevation.png", p_final,
+       width = 12, height = 6, dpi = 600)
+```

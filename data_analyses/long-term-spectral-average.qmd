@@ -1,0 +1,1279 @@
+---
+title: "long-term-spectral-average"
+format: html
+editor: visual
+---
+
+```{r}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(lubridate)
+```
+
+## Forest Habitat SPLs
+
+### Battery Island
+
+```{r}
+library(here)
+battery_island_spl <- read.csv("/users/aminashenasa/soundscapes_data/data/acoustic_data/spl_data/Battery_Island/HydroMoth_0/spl.csv")
+```
+
+```{r}
+
+# 2. Combine the separate 'Date' and 'Time' columns into one Timestamp column
+# Note: Check if your columns are capitalized exactly like 'Date' and 'Time'
+battery_island_spl <- battery_island_spl %>%
+  mutate(Timestamp = as.POSIXct(paste(Date, Time), format="%Y-%m-%d %H:%M:%S", tz="UTC"))
+
+# 3. Filter for your exact 5-day window
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+filtered_battery_island_spl <- battery_island_spl %>%
+  filter(Timestamp >= start_datetime & Timestamp <= end_datetime)
+
+# 4. Reshape data from wide columns to long format rows
+long_data <- filtered_battery_island_spl %>%
+  pivot_longer(
+    cols = contains("Octave"), # Dynamically grabs all your "1/3 Octave Band" columns
+    names_to = "Frequency_Raw",
+    values_to = "dB"
+  )
+
+# 5. Clean up the messy column names and filter out frequencies above 24 kHz
+long_data <- long_data %>%
+  # Extract just the raw numeric Hz value by stripping 'X' and everything after 'Hz'
+  mutate(Freq_Hz = as.numeric(gsub("Hz.*", "", gsub("^X", "", Frequency_Raw)))) %>%
+  
+  # REMOVE EMPTY BANDS: Filter out anything higher than your 24 kHz Nyquist limit
+  filter(Freq_Hz <= 24000) %>%
+  
+  # Create a clean label format (e.g., converts 16000 Hz to "16.0 kHz")
+  mutate(Frequency_Clean = ifelse(Freq_Hz >= 1000, 
+                                  paste0(round(Freq_Hz/1000, 1), " kHz"), 
+                                  paste0(round(Freq_Hz, 0), " Hz")))
+
+# 6. Sort the frequencies numerically so they stack correctly from lowest to highest
+long_data <- long_data %>%
+  arrange(Freq_Hz) %>%
+  mutate(Frequency_Clean = factor(Frequency_Clean, levels = unique(Frequency_Clean)))
+
+
+## 7. Convert the Timestamp from UTC to Alaska Time
+long_data <- long_data %>%
+  mutate(Timestamp = with_tz(Timestamp, tzone = "America/Anchorage"))
+
+# Verify immediately after this line:
+attr(long_data$Timestamp, "tzone")  # should now print "America/Anchorage"
+
+# 8. Adjust your filter window to use Alaska Time if needed 
+# (Or keep it as is if you want to slice the exact same data chunk)
+start_datetime_akdt <- with_tz(start_datetime, tzone = "America/Anchorage")
+end_datetime_akdt   <- with_tz(end_datetime, tzone = "America/Anchorage")
+
+# Calculate the actual sampling interval, forced to seconds
+time_diffs <- diff(sort(unique(long_data$Timestamp)))
+units(time_diffs) <- "secs"
+time_res <- as.numeric(names(sort(table(time_diffs), decreasing = TRUE)[1]))
+
+# 9.. Create the polished plot with custom X-axis time breaks
+# Build breaks anchored to 9am and 9pm each day, based on your actual AKDT range
+akdt <- "America/Anchorage"
+first_day <- as.Date(min(long_data$Timestamp), tz = akdt)   # 2025-07-23
+last_day  <- as.Date(max(long_data$Timestamp), tz = akdt)   # 2025-07-28
+
+break_seq <- seq(
+  from = as.POSIXct(paste(first_day, "09:00:00"),    tz = akdt),
+  to   = as.POSIXct(paste(last_day + 1, "09:00:00"), tz = akdt),
+  by   = "12 hours"
+)
+
+battery_island_spectrogram_plot <- ggplot(long_data, aes(x = Timestamp, y = Frequency_Clean, fill = dB)) +
+  geom_tile(width = time_res, height = 1, color = NA, linewidth = 0) +
+  scale_fill_viridis_c(option = "magma", name = "dB Level", na.value = "grey20") +
+  scale_x_datetime(
+    breaks = break_seq,
+    date_labels = "%b-%d %I:%M %p",   # e.g. "Jul-24 09:00 AM"
+    limits = c(start_datetime_akdt, end_datetime_akdt),
+    expand = expansion(mult = c(0.01, 0.03))
+  ) +
+  theme_minimal() +
+  labs(
+    title = "5-Day Long Term Spectral Average (LTSA)",
+    x = "Date & Time (Alaska Daylight Time - AKDT)",
+    y = "Frequency Band"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    axis.text.y = element_text(size = 8),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+# Render the plot
+print(battery_island_spectrogram_plot)
+```
+
+### Crow Island
+
+```{r}
+crow_island_spl <- read.csv("/users/aminashenasa/soundscapes_data/data/acoustic_data/spl_data/Crow_Island/HydroMoth_0.5/spl.csv")
+```
+
+```{r}
+# 2. Combine the separate 'Date' and 'Time' columns into one Timestamp column
+crow_island_spl <- crow_island_spl %>%
+  mutate(Timestamp = as.POSIXct(paste(Date, Time), format="%Y-%m-%d %H:%M:%S", tz="UTC"))
+
+# 3. Filter for  exact 5-day window
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+filtered_crow_island_spl <- crow_island_spl %>%
+  filter(Timestamp >= start_datetime & Timestamp <= end_datetime)
+
+# 4. Reshape data from wide columns to long format rows
+long_data <- filtered_crow_island_spl %>%
+  pivot_longer(
+    cols = contains("Octave"), # Dynamically grabs all your "1/3 Octave Band" columns
+    names_to = "Frequency_Raw",
+    values_to = "dB"
+  )
+
+# 5. Clean up the messy column names and filter out frequencies above 24 kHz
+long_data <- long_data %>%
+  # Extract just the raw numeric Hz value by stripping 'X' and everything after 'Hz'
+  mutate(Freq_Hz = as.numeric(gsub("Hz.*", "", gsub("^X", "", Frequency_Raw)))) %>%
+  
+  # REMOVE EMPTY BANDS: Filter out anything higher than your 24 kHz Nyquist limit
+  filter(Freq_Hz <= 24000) %>%
+  
+  # Create a clean label format (e.g., converts 16000 Hz to "16.0 kHz")
+  mutate(Frequency_Clean = ifelse(Freq_Hz >= 1000, 
+                                  paste0(round(Freq_Hz/1000, 1), " kHz"), 
+                                  paste0(round(Freq_Hz, 0), " Hz")))
+
+# 6. Sort the frequencies numerically so they stack correctly from lowest to highest
+long_data <- long_data %>%
+  arrange(Freq_Hz) %>%
+  mutate(Frequency_Clean = factor(Frequency_Clean, levels = unique(Frequency_Clean)))
+
+
+## 7. Convert the Timestamp from UTC to Alaska Time
+long_data <- long_data %>%
+  mutate(Timestamp = with_tz(Timestamp, tzone = "America/Anchorage"))
+
+# Verify immediately after this line:
+attr(long_data$Timestamp, "tzone")  # should now print "America/Anchorage"
+
+# 8. Adjust your filter window to use Alaska Time if needed 
+# (Or keep it as is if you want to slice the exact same data chunk)
+start_datetime_akdt <- with_tz(start_datetime, tzone = "America/Anchorage")
+end_datetime_akdt   <- with_tz(end_datetime, tzone = "America/Anchorage")
+
+# Calculate the actual sampling interval, forced to seconds
+time_diffs <- diff(sort(unique(long_data$Timestamp)))
+units(time_diffs) <- "secs"
+time_res <- as.numeric(names(sort(table(time_diffs), decreasing = TRUE)[1]))
+
+# 9.. Create the polished plot with custom X-axis time breaks
+# Build breaks anchored to 9am and 9pm each day, based on your actual AKDT range
+akdt <- "America/Anchorage"
+first_day <- as.Date(min(long_data$Timestamp), tz = akdt)   # 2025-07-23
+last_day  <- as.Date(max(long_data$Timestamp), tz = akdt)   # 2025-07-28
+
+break_seq <- seq(
+  from = as.POSIXct(paste(first_day, "09:00:00"),    tz = akdt),
+  to   = as.POSIXct(paste(last_day + 1, "09:00:00"), tz = akdt),
+  by   = "12 hours"
+)
+crow_island_spectrogram_plot <- ggplot(long_data, aes(x = Timestamp, y = Frequency_Clean, fill = dB)) +
+  geom_tile(width = time_res, height = 1, color = NA, linewidth = 0) +
+  scale_fill_viridis_c(option = "magma", name = "dB Level", na.value = "grey20") +
+  scale_x_datetime(
+    breaks = break_seq,
+    date_labels = "%b-%d %I:%M %p",   # e.g. "Jul-24 09:00 AM"
+    limits = c(start_datetime_akdt, end_datetime_akdt),
+    expand = expansion(mult = c(0.01, 0.03))
+  ) +
+  theme_minimal() +
+  labs(
+    title = "5-Day Long Term Spectral Average (LTSA)",
+    x = "Date & Time (Alaska Daylight Time - AKDT)",
+    y = "Frequency Band"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    axis.text.y = element_text(size = 8),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+# Render the plot
+print(crow_island_spectrogram_plot)
+```
+
+### Middle Island
+
+```{r}
+middle_island_spl <- read.csv("/users/aminashenasa/soundscapes_data/data/acoustic_data/spl_data/Middle_Island/HydroMoth_2/spl.csv")
+```
+
+```{r}
+# 2. Combine the separate 'Date' and 'Time' columns into one Timestamp column
+middle_island_spl <- middle_island_spl %>%
+  mutate(Timestamp = as.POSIXct(paste(Date, Time), format="%Y-%m-%d %H:%M:%S", tz="UTC"))
+
+# 3. Filter for  exact 5-day window
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+filtered_middle_island_spl <- middle_island_spl %>%
+  filter(Timestamp >= start_datetime & Timestamp <= end_datetime)
+
+# 4. Reshape data from wide columns to long format rows
+long_data <- filtered_middle_island_spl %>%
+  pivot_longer(
+    cols = contains("Octave"), # Dynamically grabs all your "1/3 Octave Band" columns
+    names_to = "Frequency_Raw",
+    values_to = "dB"
+  )
+
+# 5. Clean up the messy column names and filter out frequencies above 24 kHz
+long_data <- long_data %>%
+  # Extract just the raw numeric Hz value by stripping 'X' and everything after 'Hz'
+  mutate(Freq_Hz = as.numeric(gsub("Hz.*", "", gsub("^X", "", Frequency_Raw)))) %>%
+  
+  # REMOVE EMPTY BANDS: Filter out anything higher than your 24 kHz Nyquist limit
+  filter(Freq_Hz <= 24000) %>%
+  
+  # Create a clean label format (e.g., converts 16000 Hz to "16.0 kHz")
+  mutate(Frequency_Clean = ifelse(Freq_Hz >= 1000, 
+                                  paste0(round(Freq_Hz/1000, 1), " kHz"), 
+                                  paste0(round(Freq_Hz, 0), " Hz")))
+
+# 6. Sort the frequencies numerically so they stack correctly from lowest to highest
+long_data <- long_data %>%
+  arrange(Freq_Hz) %>%
+  mutate(Frequency_Clean = factor(Frequency_Clean, levels = unique(Frequency_Clean)))
+
+
+## 7. Convert the Timestamp from UTC to Alaska Time
+long_data <- long_data %>%
+  mutate(Timestamp = with_tz(Timestamp, tzone = "America/Anchorage"))
+
+# Verify immediately after this line:
+attr(long_data$Timestamp, "tzone")  # should now print "America/Anchorage"
+
+# 8. Adjust your filter window to use Alaska Time if needed 
+# (Or keep it as is if you want to slice the exact same data chunk)
+start_datetime_akdt <- with_tz(start_datetime, tzone = "America/Anchorage")
+end_datetime_akdt   <- with_tz(end_datetime, tzone = "America/Anchorage")
+
+# Calculate the actual sampling interval, forced to seconds
+time_diffs <- diff(sort(unique(long_data$Timestamp)))
+units(time_diffs) <- "secs"
+time_res <- as.numeric(names(sort(table(time_diffs), decreasing = TRUE)[1]))
+
+# 9.. Create the polished plot with custom X-axis time breaks
+# Build breaks anchored to 9am and 9pm each day, based on your actual AKDT range
+akdt <- "America/Anchorage"
+first_day <- as.Date(min(long_data$Timestamp), tz = akdt)   # 2025-07-23
+last_day  <- as.Date(max(long_data$Timestamp), tz = akdt)   # 2025-07-28
+
+break_seq <- seq(
+  from = as.POSIXct(paste(first_day, "09:00:00"),    tz = akdt),
+  to   = as.POSIXct(paste(last_day + 1, "09:00:00"), tz = akdt),
+  by   = "12 hours"
+)
+
+middle_island_spectrogram_plot <- ggplot(long_data, aes(x = Timestamp, y = Frequency_Clean, fill = dB)) +
+  geom_tile(width = time_res, height = 1, color = NA, linewidth = 0) +
+  scale_fill_viridis_c(option = "magma", name = "dB Level", na.value = "grey20") +
+  scale_x_datetime(
+    breaks = break_seq,
+    date_labels = "%b-%d %I:%M %p",   # e.g. "Jul-24 09:00 AM"
+    limits = c(start_datetime_akdt, end_datetime_akdt),
+    expand = expansion(mult = c(0.01, 0.03))
+  ) +
+  theme_minimal() +
+  labs(
+    title = "5-Day Long Term Spectral Average (LTSA)",
+    x = "Date & Time (Alaska Daylight Time - AKDT)",
+    y = "Frequency Band"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    axis.text.y = element_text(size = 8),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+# Render the plot
+print(middle_island_spectrogram_plot)
+```
+
+## Barren Habitat SPLs
+
+### Harris Island
+
+```{r}
+harris_island_spl <- read.csv("/users/aminashenasa/soundscapes_data/data/acoustic_data/spl_data/Harris_Island/HydroMoth_12/spl.csv")
+```
+
+```{r}
+# 2. Combine the separate 'Date' and 'Time' columns into one Timestamp column
+harris_island_spl <- harris_island_spl %>%
+  mutate(Timestamp = as.POSIXct(paste(Date, Time), format="%Y-%m-%d %H:%M:%S", tz="UTC"))
+
+# 3. Filter for  exact 5-day window
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+filtered_harris_island_spl <- harris_island_spl %>%
+  filter(Timestamp >= start_datetime & Timestamp <= end_datetime)
+
+# 4. Reshape data from wide columns to long format rows
+long_data <- filtered_harris_island_spl %>%
+  pivot_longer(
+    cols = contains("Octave"), # Dynamically grabs all your "1/3 Octave Band" columns
+    names_to = "Frequency_Raw",
+    values_to = "dB"
+  )
+
+# 5. Clean up the messy column names and filter out frequencies above 24 kHz
+long_data <- long_data %>%
+  # Extract just the raw numeric Hz value by stripping 'X' and everything after 'Hz'
+  mutate(Freq_Hz = as.numeric(gsub("Hz.*", "", gsub("^X", "", Frequency_Raw)))) %>%
+  
+  # REMOVE EMPTY BANDS: Filter out anything higher than your 24 kHz Nyquist limit
+  filter(Freq_Hz <= 24000) %>%
+  
+  # Create a clean label format (e.g., converts 16000 Hz to "16.0 kHz")
+  mutate(Frequency_Clean = ifelse(Freq_Hz >= 1000, 
+                                  paste0(round(Freq_Hz/1000, 1), " kHz"), 
+                                  paste0(round(Freq_Hz, 0), " Hz")))
+
+# 6. Sort the frequencies numerically so they stack correctly from lowest to highest
+long_data <- long_data %>%
+  arrange(Freq_Hz) %>%
+  mutate(Frequency_Clean = factor(Frequency_Clean, levels = unique(Frequency_Clean)))
+
+
+## 7. Convert the Timestamp from UTC to Alaska Time
+long_data <- long_data %>%
+  mutate(Timestamp = with_tz(Timestamp, tzone = "America/Anchorage"))
+
+# Verify immediately after this line:
+attr(long_data$Timestamp, "tzone")  # should now print "America/Anchorage"
+
+# 8. Adjust your filter window to use Alaska Time if needed 
+# (Or keep it as is if you want to slice the exact same data chunk)
+start_datetime_akdt <- with_tz(start_datetime, tzone = "America/Anchorage")
+end_datetime_akdt   <- with_tz(end_datetime, tzone = "America/Anchorage")
+
+# Calculate the actual sampling interval, forced to seconds
+time_diffs <- diff(sort(unique(long_data$Timestamp)))
+units(time_diffs) <- "secs"
+time_res <- as.numeric(names(sort(table(time_diffs), decreasing = TRUE)[1]))
+
+# 9.. Create the polished plot with custom X-axis time breaks
+# Build breaks anchored to 9am and 9pm each day, based on your actual AKDT range
+akdt <- "America/Anchorage"
+first_day <- as.Date(min(long_data$Timestamp), tz = akdt)   # 2025-07-23
+last_day  <- as.Date(max(long_data$Timestamp), tz = akdt)   # 2025-07-28
+
+break_seq <- seq(
+  from = as.POSIXct(paste(first_day, "09:00:00"),    tz = akdt),
+  to   = as.POSIXct(paste(last_day + 1, "09:00:00"), tz = akdt),
+  by   = "12 hours"
+)
+
+harris_island_spectrogram_plot <- ggplot(long_data, aes(x = Timestamp, y = Frequency_Clean, fill = dB)) +
+  geom_tile(width = time_res, height = 1, color = NA, linewidth = 0) +
+  scale_fill_viridis_c(option = "magma", name = "dB Level", na.value = "grey20") +
+  scale_x_datetime(
+    breaks = break_seq,
+    date_labels = "%b-%d %I:%M %p",   # e.g. "Jul-24 09:00 AM"
+    limits = c(start_datetime_akdt, end_datetime_akdt),
+    expand = expansion(mult = c(0.01, 0.03))
+  ) +
+  theme_minimal() +
+  labs(
+    title = "5-Day Long Term Spectral Average (LTSA)",
+    x = "Date & Time (Alaska Daylight Time - AKDT)",
+    y = "Frequency Band"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    axis.text.y = element_text(size = 8),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+# Render the plot
+print(harris_island_spectrogram_plot)
+```
+
+### Samsing Cove
+
+```{r}
+samsing_cove_spl <- read.csv("/users/aminashenasa/soundscapes_data/data/acoustic_data/spl_data/Samsing_Cove/HydroMoth_6/spl.csv")
+```
+
+```{r}
+# 2. Combine the separate 'Date' and 'Time' columns into one Timestamp column
+samsing_cove_spl <- samsing_cove_spl %>%
+  mutate(Timestamp = as.POSIXct(paste(Date, Time), format="%Y-%m-%d %H:%M:%S", tz="UTC"))
+
+# 3. Filter for  exact 5-day window
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+filtered_samsing_cove_spl <- samsing_cove_spl %>%
+  filter(Timestamp >= start_datetime & Timestamp <= end_datetime)
+
+# 4. Reshape data from wide columns to long format rows
+long_data <- filtered_samsing_cove_spl %>%
+  pivot_longer(
+    cols = contains("Octave"), # Dynamically grabs all your "1/3 Octave Band" columns
+    names_to = "Frequency_Raw",
+    values_to = "dB"
+  )
+
+# 5. Clean up the messy column names and filter out frequencies above 24 kHz
+long_data <- long_data %>%
+  # Extract just the raw numeric Hz value by stripping 'X' and everything after 'Hz'
+  mutate(Freq_Hz = as.numeric(gsub("Hz.*", "", gsub("^X", "", Frequency_Raw)))) %>%
+  
+  # REMOVE EMPTY BANDS: Filter out anything higher than your 24 kHz Nyquist limit
+  filter(Freq_Hz <= 24000) %>%
+  
+  # Create a clean label format (e.g., converts 16000 Hz to "16.0 kHz")
+  mutate(Frequency_Clean = ifelse(Freq_Hz >= 1000, 
+                                  paste0(round(Freq_Hz/1000, 1), " kHz"), 
+                                  paste0(round(Freq_Hz, 0), " Hz")))
+
+# 6. Sort the frequencies numerically so they stack correctly from lowest to highest
+long_data <- long_data %>%
+  arrange(Freq_Hz) %>%
+  mutate(Frequency_Clean = factor(Frequency_Clean, levels = unique(Frequency_Clean)))
+
+
+## 7. Convert the Timestamp from UTC to Alaska Time
+long_data <- long_data %>%
+  mutate(Timestamp = with_tz(Timestamp, tzone = "America/Anchorage"))
+
+# Verify immediately after this line:
+attr(long_data$Timestamp, "tzone")  # should now print "America/Anchorage"
+
+# 8. Adjust your filter window to use Alaska Time if needed 
+# (Or keep it as is if you want to slice the exact same data chunk)
+start_datetime_akdt <- with_tz(start_datetime, tzone = "America/Anchorage")
+end_datetime_akdt   <- with_tz(end_datetime, tzone = "America/Anchorage")
+
+# Calculate the actual sampling interval, forced to seconds
+time_diffs <- diff(sort(unique(long_data$Timestamp)))
+units(time_diffs) <- "secs"
+time_res <- as.numeric(names(sort(table(time_diffs), decreasing = TRUE)[1]))
+
+# 9.. Create the polished plot with custom X-axis time breaks
+# Build breaks anchored to 9am and 9pm each day, based on your actual AKDT range
+akdt <- "America/Anchorage"
+first_day <- as.Date(min(long_data$Timestamp), tz = akdt)   # 2025-07-23
+last_day  <- as.Date(max(long_data$Timestamp), tz = akdt)   # 2025-07-28
+
+break_seq <- seq(
+  from = as.POSIXct(paste(first_day, "09:00:00"),    tz = akdt),
+  to   = as.POSIXct(paste(last_day + 1, "09:00:00"), tz = akdt),
+  by   = "12 hours"
+)
+
+samsing_cove_spectrogram_plot <- ggplot(long_data, aes(x = Timestamp, y = Frequency_Clean, fill = dB)) +
+  geom_tile(width = time_res, height = 1, color = NA, linewidth = 0) +
+  scale_fill_viridis_c(option = "magma", name = "dB Level", na.value = "grey20") +
+  scale_x_datetime(
+    breaks = break_seq,
+    date_labels = "%b-%d %I:%M %p",   # e.g. "Jul-24 09:00 AM"
+    limits = c(start_datetime_akdt, end_datetime_akdt),
+    expand = expansion(mult = c(0.01, 0.03))
+  ) +
+  theme_minimal() +
+  labs(
+    title = "5-Day Long Term Spectral Average (LTSA)",
+    x = "Date & Time (Alaska Daylight Time - AKDT)",
+    y = "Frequency Band"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    axis.text.y = element_text(size = 8),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+print(samsing_cove_spectrogram_plot)
+range(long_data$Timestamp)
+```
+
+### Sandy Cove
+
+```{r}
+sandy_cove_spl <- read.csv("/users/aminashenasa/soundscapes_data/data/acoustic_data/spl_data/Sandy_Cove/HydroMoth_15/spl.csv")
+```
+
+```{r}
+# 2. Combine the separate 'Date' and 'Time' columns into one Timestamp column
+sandy_cove_spl <- sandy_cove_spl %>%
+  mutate(Timestamp = as.POSIXct(paste(Date, Time), format="%Y-%m-%d %H:%M:%S", tz="UTC"))
+
+# 3. Filter for  exact 5-day window
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+filtered_sandy_cove_spl <- sandy_cove_spl %>%
+  filter(Timestamp >= start_datetime & Timestamp <= end_datetime)
+
+# 4. Reshape data from wide columns to long format rows
+long_data <- filtered_sandy_cove_spl %>%
+  pivot_longer(
+    cols = contains("Octave"), # Dynamically grabs all your "1/3 Octave Band" columns
+    names_to = "Frequency_Raw",
+    values_to = "dB"
+  )
+
+# 5. Clean up the messy column names and filter out frequencies above 24 kHz
+long_data <- long_data %>%
+  # Extract just the raw numeric Hz value by stripping 'X' and everything after 'Hz'
+  mutate(Freq_Hz = as.numeric(gsub("Hz.*", "", gsub("^X", "", Frequency_Raw)))) %>%
+  
+  # REMOVE EMPTY BANDS: Filter out anything higher than your 24 kHz Nyquist limit
+  filter(Freq_Hz <= 24000) %>%
+  
+  # Create a clean label format (e.g., converts 16000 Hz to "16.0 kHz")
+  mutate(Frequency_Clean = ifelse(Freq_Hz >= 1000, 
+                                  paste0(round(Freq_Hz/1000, 1), " kHz"), 
+                                  paste0(round(Freq_Hz, 0), " Hz")))
+
+# 6. Sort the frequencies numerically so they stack correctly from lowest to highest
+long_data <- long_data %>%
+  arrange(Freq_Hz) %>%
+  mutate(Frequency_Clean = factor(Frequency_Clean, levels = unique(Frequency_Clean)))
+
+
+## 7. Convert the Timestamp from UTC to Alaska Time
+long_data <- long_data %>%
+  mutate(Timestamp = with_tz(Timestamp, tzone = "America/Anchorage"))
+
+# Verify immediately after this line:
+attr(long_data$Timestamp, "tzone")  # should now print "America/Anchorage"
+
+# 8. Adjust your filter window to use Alaska Time if needed 
+# (Or keep it as is if you want to slice the exact same data chunk)
+start_datetime_akdt <- with_tz(start_datetime, tzone = "America/Anchorage")
+end_datetime_akdt   <- with_tz(end_datetime, tzone = "America/Anchorage")
+
+# Calculate the actual sampling interval, forced to seconds
+time_diffs <- diff(sort(unique(long_data$Timestamp)))
+units(time_diffs) <- "secs"
+time_res <- as.numeric(names(sort(table(time_diffs), decreasing = TRUE)[1]))
+
+# 9.. Create the polished plot with custom X-axis time breaks
+# Build breaks anchored to 9am and 9pm each day, based on your actual AKDT range
+akdt <- "America/Anchorage"
+first_day <- as.Date(min(long_data$Timestamp), tz = akdt)   # 2025-07-23
+last_day  <- as.Date(max(long_data$Timestamp), tz = akdt)   # 2025-07-28
+
+break_seq <- seq(
+  from = as.POSIXct(paste(first_day, "09:00:00"),    tz = akdt),
+  to   = as.POSIXct(paste(last_day + 1, "09:00:00"), tz = akdt),
+  by   = "12 hours"
+)
+
+sandy_cove_spectrogram_plot <- ggplot(long_data, aes(x = Timestamp, y = Frequency_Clean, fill = dB)) +
+  geom_tile(width = time_res, height = 1, color = NA, linewidth = 0) +
+  scale_fill_viridis_c(option = "magma", name = "dB Level", na.value = "grey20") +
+  scale_x_datetime(
+    breaks = break_seq,
+    date_labels = "%b-%d %I:%M %p",   # e.g. "Jul-24 09:00 AM"
+    limits = c(start_datetime_akdt, end_datetime_akdt),
+    expand = expansion(mult = c(0.01, 0.03))
+  ) +
+  theme_minimal() +
+  labs(
+    title = "5-Day Long Term Spectral Average (LTSA)",
+    x = "Date & Time (Alaska Daylight Time - AKDT)",
+    y = "Frequency Band"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    axis.text.y = element_text(size = 8),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+#render the plot
+print(sandy_cove_spectrogram_plot)
+range(long_data$Timestamp)
+```
+
+## Combining plots
+
+```{r}
+library(patchwork)
+library(ggplot2)
+library(grid)
+library(scales) 
+#shared color scale
+
+shared_scale <- scale_fill_viridis_c(
+  option = "magma",
+  limits = c(-80, -20),
+  oob    = scales::squish,
+  name   = "dB Level"
+)
+#shared y-axis
+thin_y_axis <- scale_y_discrete(
+  breaks = c("20 Hz", "50 Hz", "125 Hz", "315 Hz", "794 Hz",
+             "2 kHz", "5 kHz", "12.7 kHz", "20.2 kHz")
+)
+
+#per-plot cleanup
+clean_plot <- function(p, site_name) {
+  p +
+    shared_scale +
+    thin_y_axis +
+    ggtitle(site_name) +
+    theme(
+      plot.title    = element_text(size = 13, face = "bold", hjust = 0),
+      axis.text.x   = element_text(size = 7),
+      axis.text.y   = element_text(size = 7)
+    )
+}
+
+# Strips x-axis text, ticks, and title -- used on the top 2 plots
+# in each column so only the bottom plot shows the x-axis
+drop_x_axis <- theme(
+  axis.text.x  = element_blank(),
+  axis.title.x = element_blank(),
+  axis.ticks.x = element_blank()
+)
+
+sandy_cove_spectrogram_plot     <- clean_plot(sandy_cove_spectrogram_plot, "Sandy Cove") + drop_x_axis
+samsing_cove_spectrogram_plot   <- clean_plot(samsing_cove_spectrogram_plot, "Samsing Cove") + drop_x_axis
+harris_island_spectrogram_plot  <- clean_plot(harris_island_spectrogram_plot, "Harris Island")  # bottom of left column, keeps x-axis
+
+middle_island_spectrogram_plot  <- clean_plot(middle_island_spectrogram_plot, "Middle Island") + drop_x_axis
+battery_island_spectrogram_plot <- clean_plot(battery_island_spectrogram_plot, "Battery Island") + drop_x_axis
+crow_island_spectrogram_plot    <- clean_plot(crow_island_spectrogram_plot, "Crow Island")  # bottom of right column, keeps x-axis
+
+#assemble columns
+urchin_barrens <- sandy_cove_spectrogram_plot /
+                   samsing_cove_spectrogram_plot /
+                   harris_island_spectrogram_plot
+
+kelp_forests <- middle_island_spectrogram_plot /
+                 battery_island_spectrogram_plot /
+                 crow_island_spectrogram_plot
+
+#column headers
+header_style <- grid::gpar(fontsize = 16, fontface = "bold")
+
+urchin_header <- patchwork::wrap_elements(
+  grid::textGrob("Urchin Barren", gp = header_style, vjust = 0.5)
+) + theme(plot.margin = margin(0, 0, 0, 0))
+
+kelp_header <- patchwork::wrap_elements(
+  grid::textGrob("Kelp Forest", gp = header_style, vjust = 0.5)
+) + theme(plot.margin = margin(0, 0, 0, 0))
+
+header_row <- urchin_header | kelp_header
+
+#combine plots
+combined_plot <- (header_row / (urchin_barrens | kelp_forests)) +
+  plot_layout(guides = "collect", heights = c(.05, 1)) +   # shrink header row
+  plot_annotation(
+    title = "5-Day Long Term Spectral Averages by Site",
+    theme = theme(plot.title = element_text(size = 16, margin = margin(b = 2)))
+  ) &
+  theme(
+    legend.position = "right",
+  plot.margin = margin(t = 5, r = 15, b = 5, l = 5)
+  )
+
+combined_plot
+
+ggsave("combined_spectrograms.png", combined_plot, width = 14, height = 12, dpi = 400)
+```
+
+## Second set of HydroMoths
+
+```{r}
+battery_island_spl_2 <- read.csv("/users/aminashenasa/soundscapes_data/data/acoustic_data/spl_data/Battery_Island/HydroMoth_0.25/spl.csv")
+```
+
+```{r}
+
+# 2. Combine the separate 'Date' and 'Time' columns into one Timestamp column
+# Note: Check if your columns are capitalized exactly like 'Date' and 'Time'
+battery_island_spl_2 <- battery_island_spl_2 %>%
+  mutate(Timestamp = as.POSIXct(paste(Date, Time), format="%Y-%m-%d %H:%M:%S", tz="UTC"))
+
+# 3. Filter for your exact 5-day window
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+filtered_battery_island_spl_2 <- battery_island_spl_2 %>%
+  filter(Timestamp >= start_datetime & Timestamp <= end_datetime)
+
+# 4. Reshape data from wide columns to long format rows
+long_data <- filtered_battery_island_spl_2 %>%
+  pivot_longer(
+    cols = contains("Octave"), # Dynamically grabs all your "1/3 Octave Band" columns
+    names_to = "Frequency_Raw",
+    values_to = "dB"
+  )
+
+# 5. Clean up the messy column names and filter out frequencies above 24 kHz
+long_data <- long_data %>%
+  # Extract just the raw numeric Hz value by stripping 'X' and everything after 'Hz'
+  mutate(Freq_Hz = as.numeric(gsub("Hz.*", "", gsub("^X", "", Frequency_Raw)))) %>%
+  
+  # REMOVE EMPTY BANDS: Filter out anything higher than your 24 kHz Nyquist limit
+  filter(Freq_Hz <= 24000) %>%
+  
+  # Create a clean label format (e.g., converts 16000 Hz to "16.0 kHz")
+  mutate(Frequency_Clean = ifelse(Freq_Hz >= 1000, 
+                                  paste0(round(Freq_Hz/1000, 1), " kHz"), 
+                                  paste0(round(Freq_Hz, 0), " Hz")))
+
+# 6. Sort the frequencies numerically so they stack correctly from lowest to highest
+long_data <- long_data %>%
+  arrange(Freq_Hz) %>%
+  mutate(Frequency_Clean = factor(Frequency_Clean, levels = unique(Frequency_Clean)))
+
+
+# 7. Convert the Timestamp from UTC to Alaska Time ("America/Anchorage")
+# This shifts the underlying clock back automatically by 8 hours for July
+long_data <- long_data %>%
+  mutate(Timestamp = with_tz(Timestamp, tzone = "America/Anchorage"))
+
+# 8. Adjust your filter window to use Alaska Time if needed 
+# (Or keep it as is if you want to slice the exact same data chunk)
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+# 9.. Create the polished plot with custom X-axis time breaks
+battery_island_spectrogram_plot_2 <- ggplot(long_data, aes(x = Timestamp, y = Frequency_Clean, fill = dB)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "magma", name = "dB Level") +
+  
+  # --- ADD DETAIL TO X-AXIS ---
+  # Breaks every 12 hours showing Month-Day Hour:Minute
+  scale_x_datetime(
+    date_breaks = "12 hours", 
+    date_labels = "%b-%d %H:%M"
+  ) +
+  # ----------------------------
+  
+  theme_minimal() +
+  labs(
+    title = "5-Day Long Term Spectral Average (LTSA)",
+    x = "Date & Time (Alaska Daylight Time - AKDT)",
+    y = "Frequency Band"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8), # Rotates labels to fit perfectly
+    axis.text.y = element_text(size = 8),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+# Render the plot
+print(battery_island_spectrogram_plot_2)
+```
+
+```{r}
+crow_island_spl_2 <- read.csv("/users/aminashenasa/soundscapes_data/data/acoustic_data/spl_data/Battery_Island/HydroMoth_0.25/spl.csv")
+```
+
+```{r}
+# 2. Combine the separate 'Date' and 'Time' columns into one Timestamp column
+crow_island_spl_2 <- crow_island_spl_2 %>%
+  mutate(Timestamp = as.POSIXct(paste(Date, Time), format="%Y-%m-%d %H:%M:%S", tz="UTC"))
+
+# 3. Filter for  exact 5-day window
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+filtered_crow_island_spl_2 <- crow_island_spl_2 %>%
+  filter(Timestamp >= start_datetime & Timestamp <= end_datetime)
+
+# 4. Reshape data from wide columns to long format rows
+long_data <- filtered_crow_island_spl_2 %>%
+  pivot_longer(
+    cols = contains("Octave"), # Dynamically grabs all your "1/3 Octave Band" columns
+    names_to = "Frequency_Raw",
+    values_to = "dB"
+  )
+
+# 5. Clean up the messy column names and filter out frequencies above 24 kHz
+long_data <- long_data %>%
+  # Extract just the raw numeric Hz value by stripping 'X' and everything after 'Hz'
+  mutate(Freq_Hz = as.numeric(gsub("Hz.*", "", gsub("^X", "", Frequency_Raw)))) %>%
+  
+  # REMOVE EMPTY BANDS: Filter out anything higher than your 24 kHz Nyquist limit
+  filter(Freq_Hz <= 24000) %>%
+  
+  # Create a clean label format (e.g., converts 16000 Hz to "16.0 kHz")
+  mutate(Frequency_Clean = ifelse(Freq_Hz >= 1000, 
+                                  paste0(round(Freq_Hz/1000, 1), " kHz"), 
+                                  paste0(round(Freq_Hz, 0), " Hz")))
+
+# 6. Sort the frequencies numerically so they stack correctly from lowest to highest
+long_data <- long_data %>%
+  arrange(Freq_Hz) %>%
+  mutate(Frequency_Clean = factor(Frequency_Clean, levels = unique(Frequency_Clean)))
+
+
+# 7. Convert the Timestamp from UTC to Alaska Time ("America/Anchorage")
+# This shifts the underlying clock back automatically by 8 hours for July
+long_data <- long_data %>%
+  mutate(Timestamp = with_tz(Timestamp, tzone = "America/Anchorage"))
+
+# 8. Adjust your filter window to use Alaska Time if needed 
+# (Or keep it as is if you want to slice the exact same data chunk)
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+# 9.. Create the polished plot with custom X-axis time breaks
+crow_island_spectrogram_plot_2 <- ggplot(long_data, aes(x = Timestamp, y = Frequency_Clean, fill = dB)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "magma", name = "dB Level") +
+  
+  # --- ADD DETAIL TO X-AXIS ---
+  # Breaks every 12 hours showing Month-Day Hour:Minute
+  scale_x_datetime(
+    date_breaks = "12 hours", 
+    date_labels = "%b-%d %H:%M"
+  ) +
+  # ----------------------------
+  
+  theme_minimal() +
+  labs(
+    title = "5-Day Long Term Spectral Average (LTSA)",
+    x = "Date & Time (Alaska Daylight Time - AKDT)",
+    y = "Frequency Band"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8), # Rotates labels to fit perfectly
+    axis.text.y = element_text(size = 8),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+# Render the plot
+print(crow_island_spectrogram_plot_2)
+```
+
+## Max SPL Per 6 Seconds
+
+```{r}
+harris_island_spl_max <- read.csv("/users/aminashenasa/soundscapes_data/data/acoustic_data/spl_data/max_spl/Harris_Island/HydroMoth_12/spl.csv")
+```
+
+```{r}
+# 2. Combine the separate 'Date' and 'Time' columns into one Timestamp column
+harris_island_spl_max <- harris_island_spl_max %>%
+  mutate(Timestamp = as.POSIXct(paste(Date, Time), format="%Y-%m-%d %H:%M:%S", tz="UTC"))
+
+# 3. Filter for  exact 5-day window
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+filtered_harris_island_spl_max <- harris_island_spl_max %>%
+  filter(Timestamp >= start_datetime & Timestamp <= end_datetime)
+
+# 4. Reshape data from wide columns to long format rows
+long_data <- filtered_harris_island_spl_max %>%
+  pivot_longer(
+    cols = contains("Octave"), # Dynamically grabs all your "1/3 Octave Band" columns
+    names_to = "Frequency_Raw",
+    values_to = "dB"
+  )
+
+# 5. Clean up the messy column names and filter out frequencies above 24 kHz
+long_data <- long_data %>%
+  # Extract just the raw numeric Hz value by stripping 'X' and everything after 'Hz'
+  mutate(Freq_Hz = as.numeric(gsub("Hz.*", "", gsub("^X", "", Frequency_Raw)))) %>%
+  
+  # REMOVE EMPTY BANDS: Filter out anything higher than your 24 kHz Nyquist limit
+  filter(Freq_Hz <= 24000) %>%
+  
+  # Create a clean label format (e.g., converts 16000 Hz to "16.0 kHz")
+  mutate(Frequency_Clean = ifelse(Freq_Hz >= 1000, 
+                                  paste0(round(Freq_Hz/1000, 1), " kHz"), 
+                                  paste0(round(Freq_Hz, 0), " Hz")))
+
+# 6. Sort the frequencies numerically so they stack correctly from lowest to highest
+long_data <- long_data %>%
+  arrange(Freq_Hz) %>%
+  mutate(Frequency_Clean = factor(Frequency_Clean, levels = unique(Frequency_Clean)))
+
+
+# 7. Convert the Timestamp from UTC to Alaska Time ("America/Anchorage")
+# This shifts the underlying clock back automatically by 8 hours for July
+long_data <- long_data %>%
+  mutate(Timestamp = with_tz(Timestamp, tzone = "America/Anchorage"))
+
+# 8. Adjust your filter window to use Alaska Time if needed 
+# (Or keep it as is if you want to slice the exact same data chunk)
+start_datetime <- ymd_hms("2025-07-23 23:59:43", tz = "UTC")
+end_datetime   <- ymd_hms("2025-07-28 23:59:32", tz = "UTC")
+
+# 9.. Create the polished plot with custom X-axis time breaks
+harris_island_spectrogram_plot_max <- ggplot(long_data, aes(x = Timestamp, y = Frequency_Clean, fill = dB)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "magma", name = "dB Level") +
+  
+  # --- ADD DETAIL TO X-AXIS ---
+  # Breaks every 12 hours showing Month-Day Hour:Minute
+  scale_x_datetime(
+    date_breaks = "12 hours", 
+    date_labels = "%b-%d %H:%M"
+  ) +
+  # ----------------------------
+  
+  theme_minimal() +
+  labs(
+    title = "5-Day Long Term Spectral Average (LTSA)",
+    x = "Date & Time (Alaska Daylight Time - AKDT)",
+    y = "Frequency Band"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8), # Rotates labels to fit perfectly
+    axis.text.y = element_text(size = 8),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+# Render the plot
+print(harris_island_spectrogram_plot_max)
+```
+
+```{r}
+cat("Battery Island:", time_res, "seconds\n")
+cat("Harris Island:", time_res, "seconds\n")
+cat("Crow Island:", time_res, "seconds\n")
+cat("Samsing Cove", time_res, "seconds\n")
+cat("Sandy Cove", time_res, "seconds\n")
+cat("Middle Island", time_res, "seconds\n")
+```
+
+## Making Index Plots to Match Spectrograms
+
+```{r}
+library(dplyr)
+library(lubridate)
+
+site_tz <- "America/Sitka"
+
+# Fix the timezone: UTC digits -> AK clock
+ts_ak <- with_tz(force_tz(urchin_prob_df$full_datetime, tzone = "UTC"), site_tz)
+
+
+head(ts_ak)
+
+# Build the plotting frame
+plot_df <- urchin_prob_df %>%
+  mutate(full_datetime = ts_ak) %>%
+  select(SITE, full_datetime,
+         NDSI, ACI, ADI, AEI,
+         prob_barren, urchin_pc1) %>%
+  filter(!is.na(full_datetime)) %>%
+  arrange(SITE, full_datetime)
+
+# Checks
+nrow(plot_df)
+sum(is.na(plot_df$prob_barren))
+n_distinct(plot_df$SITE)                            # want 6
+sum(duplicated(plot_df[c("SITE","full_datetime")])) # want 0
+range(plot_df$full_datetime)
+summary(plot_df$urchin_pc1)                         # vs c(-4.5, 2) limits
+
+# Window + hand off
+start_local <- min(plot_df$full_datetime, na.rm = TRUE)
+end_local   <- max(plot_df$full_datetime, na.rm = TRUE)
+break_seq   <- seq(floor_date(start_local, "day"), end_local, by = "12 hours")
+
+all_data <- plot_df   # existing build_site_stack() calls work unchanged
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# Returns a single flat 5-panel stack: spectrogram + NDSI + ACI + ADI + AEI
+build_site_stack <- function(spectrogram_plot, data, site_name, start_local, end_local, break_seq) {
+  
+  site_data <- data %>%
+    filter(SITE == site_name) %>%
+    filter(Timestamp >= start_local & Timestamp <= end_local)
+  
+  make_index_panel <- function(index_name, show_x_axis = FALSE) {
+    p <- ggplot(site_data, aes(x = Timestamp, y = .data[[index_name]])) +
+      geom_line(linewidth = 0.4, color = "steelblue") +
+      scale_x_datetime(
+        breaks = break_seq,
+        date_labels = "%b-%d %I:%M %p",
+        limits = c(start_local, end_local),
+        expand = expansion(mult = c(0.01, 0.03))
+      ) +
+      theme_minimal() +
+      labs(y = index_name, x = NULL) +
+      theme(
+        axis.text.y = element_text(size = 7),
+        axis.title.y = element_text(size = 8, face = "bold"),
+        panel.grid.minor = element_blank()
+      )
+    
+    if (show_x_axis) {
+      p <- p + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 7))
+    } else {
+      p <- p + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+    }
+    p
+  }
+  
+  spec_top <- spectrogram_plot + theme(axis.text.x = element_blank(), axis.title.x = element_blank(), axis.ticks.x = element_blank())
+  ndsi_panel <- make_index_panel("NDSI")
+  aci_panel  <- make_index_panel("ACI")
+  adi_panel  <- make_index_panel("ADI")
+  aei_panel  <- make_index_panel("AEI", show_x_axis = TRUE)
+  
+  # FLAT stack - no nested patchwork objects
+  spec_top / ndsi_panel / aci_panel / adi_panel / aei_panel +
+    plot_layout(heights = c(2, 1, 1, 1, 1.3)) +
+    plot_annotation(title = site_name, theme = theme(plot.title = element_text(face = "bold", size = 12)))
+}
+
+# Build all six as flat stacks directly
+sandy_cove_paired     <- build_site_stack(sandy_cove_spectrogram_plot,     all_data, "Sandy_Cove",     start_local, end_local, break_seq)
+samsing_cove_paired   <- build_site_stack(samsing_cove_spectrogram_plot,   all_data, "Samsing_Cove",   start_local, end_local, break_seq)
+harris_island_paired  <- build_site_stack(harris_island_spectrogram_plot,  all_data, "Harris_Island",  start_local, end_local, break_seq)
+middle_island_paired  <- build_site_stack(middle_island_spectrogram_plot,  all_data, "Middle_Island",  start_local, end_local, break_seq)
+battery_island_paired <- build_site_stack(battery_island_spectrogram_plot, all_data, "Battery_Island", start_local, end_local, break_seq)
+crow_island_paired    <- build_site_stack(crow_island_spectrogram_plot,   all_data, "Crow_Island",    start_local, end_local, break_seq)
+
+```
+
+```{r}
+battery_island_paired 
+ggsave("battery_island_paired.png", battery_island_paired, width = 14, height = 12, dpi = 400)
+```
+
+```{r}
+middle_island_paired
+ggsave("middle_island_paired.png", middle_island_paired, width = 14, height = 12, dpi = 400)
+```
+
+```{r}
+crow_island_paired
+ggsave("crow_island_paired.png", crow_island_paired, width = 14, height = 12, dpi = 400)
+```
+
+```{r}
+harris_island_paired
+ggsave("harris_island_paired.png", harris_island_paired, width = 14, height = 12, dpi = 400)
+```
+
+```{r}
+samsing_cove_paired
+ggsave("samsing_cove_paired.png", samsing_cove_paired, width = 14, height = 12, dpi = 400)
+```
+
+```{r}
+sandy_cove_paired
+ggsave("sandy_cove_paired.png", sandy_cove_paired, width = 14, height = 12, dpi = 400)
+```
+
+### Adding in P(Barren) and P(Urchin) from SVMs
+
+```{r}
+length(cca_probs_full)
+length(rock_probs_full)
+length(kelp_probs_full)
+length(habitat_model_data$SITE)
+length(pc1_scores)
+```
+
+```{r}
+summary(urchin_prob_df$urchin_pc1)
+```
+
+```{r}
+urchin_prob_df %>%
+  filter(SITE == "Battery_Island") %>%
+  select(
+    SITE,
+    full_datetime,
+    cca_prob,
+    rock_prob,
+    kelp_prob,
+    urchin_pc1
+  ) %>%
+  head()
+```
+
+```{r}
+all_data <- plot_df
+
+ncol(all_data)                      # 8
+"urchin_pc1" %in% names(all_data)   # TRUE
+
+start_local <- min(all_data$full_datetime, na.rm = TRUE)
+end_local   <- max(all_data$full_datetime, na.rm = TRUE)
+break_seq   <- seq(floor_date(start_local, "day"), end_local, by = "12 hours")
+
+start_local; end_local               # should read AKDT, starting mid-afternoon Jul-23
+```
+
+```{r}
+build_site_stack <- function(spectrogram_plot, data, site_name,
+                             start_local, end_local, break_seq,
+                             sun_times = NULL) {
+
+  site_data <- data %>%
+    filter(SITE == site_name,
+           full_datetime >= start_local,
+           full_datetime <= end_local)
+
+  
+  # sunrise/sunset lines (long format: event + time)
+  add_sun_lines <- function(p) {
+    if (is.null(sun_win) || nrow(sun_win) == 0) return(p)
+    p +
+      geom_vline(data = filter(sun_win, event == "sunrise"),
+                 aes(xintercept = time),
+                 color = "black", linewidth = 0.5) +
+      geom_vline(data = filter(sun_win, event == "sunset"),
+                 aes(xintercept = time),
+                 linetype = "longdash", color = "black", linewidth = 0.5)
+  }
+  
+  # sun events inside the window, filtered per-event 
+  sun_win <- NULL
+  if (!is.null(sun_times)) {
+    sun_win <- bind_rows(
+      tibble(event = "sunrise", time = sun_times$sunrise),
+      tibble(event = "sunset",  time = sun_times$sunset)
+    ) %>%
+      filter(time >= start_local, time <= end_local) %>%
+      arrange(time)
+  }
+
+  # night intervals: sunset(day n) -> sunrise(day n+1) 
+  # built from the FULL table so edge nights aren't lost, then trimmed
+  night_win <- NULL
+  if (!is.null(sun_times) && nrow(sun_times) > 1) {
+    st <- sun_times %>% arrange(sunrise)
+    night_win <- tibble(
+      start = head(st$sunset, -1),
+      end   = tail(st$sunrise, -1)
+    ) %>%
+      filter(start < end_local, end > start_local)
+  }
+
+  # night shading
+  add_night_shade <- function(p) {
+    if (is.null(night_win) || nrow(night_win) == 0) return(p)
+    p + geom_rect(data = night_win, inherit.aes = FALSE,
+                  aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf),
+                  fill = "grey20", alpha = 0.10)
+  }
+
+  make_index_panel <- function(index_name, show_x_axis = FALSE,
+                               colour = "steelblue", limits = NULL,
+                               y_label = index_name) {
+
+    p <- ggplot(site_data, aes(x = full_datetime, y = .data[[index_name]]))
+
+    p <- add_night_shade(p)                              # 1. shading underneath
+    p <- p + geom_line(linewidth = 0.4, color = colour)  # 2. data on top
+    p <- add_sun_lines(p)                                # 3. lines on top of that
+
+    p <- p +
+      scale_x_datetime(
+        breaks = break_seq,
+        date_labels = "%b-%d %I:%M %p",
+        limits = c(start_local, end_local),
+        expand = expansion(mult = c(0.01, 0.03)),
+        timezone = site_tz
+      ) +
+      theme_minimal() +
+      labs(y = y_label, x = NULL) +
+      theme(
+        axis.text.y = element_text(size = 7),
+        axis.title.y = element_text(size = 8, face = "bold"),
+        panel.grid.minor = element_blank()
+      )
+
+    if (!is.null(limits)) p <- p + coord_cartesian(ylim = limits)
+
+    if (show_x_axis) {
+      p <- p + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 7))
+    } else {
+      p <- p + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+    }
+    p
+  }
+
+  # spectrogram: lines only
+  spec_top <- spectrogram_plot + labs(title = NULL, subtitle = NULL)
+  spec_top <- add_sun_lines(spec_top) +
+    theme(axis.text.x = element_blank(), axis.title.x = element_blank(),
+          axis.ticks.x = element_blank())
+
+  ndsi_panel <- make_index_panel("NDSI")
+  aci_panel  <- make_index_panel("ACI")
+  adi_panel  <- make_index_panel("ADI")
+  aei_panel  <- make_index_panel("AEI")
+
+  barren_panel <- make_index_panel(
+    "prob_barren", colour = "firebrick", limits = c(0, 1),
+    y_label = "Probability of\nUrchin Barren (SVM)"
+  ) +
+    geom_hline(yintercept = 0.5, linetype = "dashed", color = "grey50")
+
+  urchin_panel <- make_index_panel(
+    "urchin_pc1", show_x_axis = TRUE, colour = "darkgreen",
+    limits = c(-4.5, 2), y_label = "Urchin Noise (PC1)"
+  )
+
+  clean_name <- gsub("_", " ", site_name)
+
+  (spec_top / ndsi_panel / aci_panel / adi_panel /
+     aei_panel / barren_panel / urchin_panel) +
+    plot_layout(heights = c(2, 1, 1, 1, 1, 1, 1.3)) +
+    plot_annotation(title = clean_name,
+                    theme = theme(plot.title = element_text(face = "bold", size = 12)))
+}
+```
+
+```{r}
+sandy_cove_paired_all     <- build_site_stack(sandy_cove_spectrogram_plot,     all_data, "Sandy_Cove",     start_local, end_local, break_seq, sun_times)
+samsing_cove_paired_all   <- build_site_stack(samsing_cove_spectrogram_plot,   all_data, "Samsing_Cove",   start_local, end_local, break_seq, sun_times)
+harris_island_paired_all  <- build_site_stack(harris_island_spectrogram_plot,  all_data, "Harris_Island",  start_local, end_local, break_seq, sun_times)
+middle_island_paired_all  <- build_site_stack(middle_island_spectrogram_plot,  all_data, "Middle_Island",  start_local, end_local, break_seq, sun_times)
+battery_island_paired_all <- build_site_stack(battery_island_spectrogram_plot, all_data, "Battery_Island", start_local, end_local, break_seq, sun_times)
+crow_island_paired_all    <- build_site_stack(crow_island_spectrogram_plot,    all_data, "Crow_Island",    start_local, end_local, break_seq, sun_times)
+
+ggsave("sandy_cove_paired_all.png",     sandy_cove_paired_all,     width = 14, height = 12, dpi = 400)
+ggsave("samsing_cove_paired_all.png",   samsing_cove_paired_all,   width = 14, height = 12, dpi = 400)
+ggsave("harris_island_paired_all.png",  harris_island_paired_all,  width = 14, height = 12, dpi = 400)
+ggsave("middle_island_paired_all.png",  middle_island_paired_all,  width = 14, height = 12, dpi = 400)
+ggsave("battery_island_paired_all.png", battery_island_paired_all, width = 14, height = 12, dpi = 400)
+ggsave("crow_island_paired_all.png",    crow_island_paired_all,    width = 14, height = 12, dpi = 400)
+```

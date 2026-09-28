@@ -1,0 +1,7 @@
+"site","mean_prob","mean_pc1","true_type","n_obs","join_key","TYPE","SITE","red_urchin_biomass","stipe_density","red_urchin_density","green_urchin_density","Mean.Haliotis.kamtschatkana..pinto.abalone.","Mean.Apostichopus.californicus..California.cucumber.","total.urchin.density","mean.relief","variance.relief"
+"battery_island",0.189749524360519,-0.853411377067711,"Macro_Forest",7206,"battery_island","Macro_Forest","Battery_Island",130.0687534,1.34,0.4,0.1,1.5,0,0.5,1.193333333,0.7980903955
+"crow_island",0.284260490570095,-1.26800348399832,"Macro_Forest",7205,"crow_island","Macro_Forest","Crow_Island",0.073929431,1.1,0.05,0.05,4.5,0,0.1,0.8508333333,0.7935162429
+"harris_island",0.553834406240419,-0.464774005958912,"Barren",7206,"harris_island","Barren","Harris_Island",162.4128492,0,1.1,8.421052632,6.666666667,0.3333333333,9.521052632,0.3066666667,0.1092829132
+"middle_island",0.415476588237338,-0.0132099569328237,"Macro_Forest",7205,"middle_island","Macro_Forest","Middle_Island",0.4509064309,3.375,0.05,0.1,4.333333333,0,0.15,0.6883333333,0.5345225989
+"samsing_cove",0.806629699941637,1.48555367310714,"Barren",7206,"samsing_cove","Barren","Samsing_Cove",219.0811983,0,2.5,3.815789474,12.66666667,0.3333333333,6.315789474,1.209166667,0.792414548
+"sandy_cove",0.746858769599719,1.11382192138656,"Barren",7205,"sandy_cove","Barren","Sandy_Cove",155.1619073,0,2.788461538,4.393939394,21.57843137,1.833333333,7.182400932,0.3771186441,0.1525277615
